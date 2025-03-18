@@ -1,0 +1,112 @@
+[
+    {
+      "id": "rev-2001",
+      "product_id": "eco-1001",
+      "customer_id": "cust-1001",
+      "date": "2024-11-20",
+      "rating": 5,
+      "title": "Best water bottle ever!",
+      "content": "I've been using this bamboo water bottle for a month now and it's fantastic. Keeps water cool and looks beautiful. Highly recommend!",
+      "verified_purchase": true,
+      "helpful_votes": 12
+    },
+    {
+      "id": "rev-2002",
+      "product_id": "eco-1001",
+      "customer_id": "cust-1003",
+      "date": "2024-11-30",
+      "rating": 4,
+      "title": "Great but could be better",
+      "content": "Love the sustainability aspect and how it keeps drinks cold. Only giving 4 stars because it's a bit heavy compared to my previous bottle.",
+      "verified_purchase": true,
+      "helpful_votes": 5
+    },
+    {
+      "id": "rev-2003",
+      "product_id": "eco-1002",
+      "customer_id": "cust-1002",
+      "date": "2024-10-15",
+      "rating": 5,
+      "title": "Perfect for my journaling",
+      "content": "The recycled paper has a wonderful texture and the notebook lies flat when open. The fact that it's made from recycled materials makes it even better!",
+      "verified_purchase": true,
+      "helpful_votes": 8
+    },
+    {
+      "id": "rev-2004",
+      "product_id": "eco-1003",
+      "customer_id": "cust-1003",
+      "date": "2024-12-05",
+      "rating": 5,
+      "title": "Solar charger saved me on my camping trip",
+      "content": "Incredible product! Charged my phone fully in about 5 hours of direct sunlight. The build quality is excellent and it's surprisingly lightweight.",
+      "verified_purchase": true,
+      "helpful_votes": 22
+    },
+    {
+      "id": "rev-2005",
+      "product_id": "eco-1004",
+      "customer_id": "cust-1001",
+      "date": "2024-11-12",
+      "rating": 5,
+      "title": "No more plastic cutlery!",
+      "content": "I take this bamboo cutlery set everywhere now. The case is compact enough to fit in my bag, and I love not having to use disposable plastics when eating out.",
+      "verified_purchase": true,
+      "helpful_votes": 14
+    },
+    {
+      "id": "rev-2006",
+      "product_id": "eco-1005",
+      "customer_id": "cust-1002",
+      "date": "2024-12-01",
+      "rating": 3,
+      "title": "Nice concept but durability issues",
+      "content": "I love the idea of the recycled denim cover, but after just two weeks the binding is starting to come apart. The paper quality is good though.",
+      "verified_purchase": true,
+      "helpful_votes": 9
+    },
+    {
+      "id": "rev-2007",
+      "product_id": "eco-1004",
+      "customer_id": "cust-1003",
+      "date": "2024-10-30",
+      "rating": 4,
+      "title": "Great for travel",
+      "content": "The bamboo cutlery set is exactly what I needed for my business trips. Lightweight and eco-friendly. Only wish the carrying case was a bit more water-resistant.",
+      "verified_purchase": true,
+      "helpful_votes": 6
+    },
+    {
+      "id": "rev-2008",
+      "product_id": "eco-1006",
+      "customer_id": "cust-1001",
+      "date": "2025-01-15",
+      "rating": 5,
+      "title": "Sturdy and stylish!",
+      "content": "This hemp backpack is amazing. It's been through rain and rough handling and still looks brand new. Love the earthy look and all the pockets. Perfect for day hikes or commuting.",
+      "verified_purchase": true,
+      "helpful_votes": 18
+    },
+    {
+      "id": "rev-2009",
+      "product_id": "eco-1007",
+      "customer_id": "cust-1004",
+      "date": "2025-01-12",
+      "rating": 4,
+      "title": "Great alternative to plastic bags",
+      "content": "These silicone food bags are very versatile. They're easy to clean and have kept my food fresh. The only downside is they take up more space than plastic bags when storing empty.",
+      "verified_purchase": true,
+      "helpful_votes": 7
+    },
+    {
+      "id": "rev-2010",
+      "product_id": "eco-1008",
+      "customer_id": "cust-1005",
+      "date": "2025-01-08",
+      "rating": 4,
+      "title": "Sustainable choice for everyday use",
+      "content": "Switching to bamboo toothbrushes was an easy eco-friendly change. They clean just as well as plastic ones. Only giving 4 stars because the bristles wear out a bit faster than my old brushes.",
+      "verified_purchase": true,
+      "helpful_votes": 11
+    }
+  ]

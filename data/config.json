@@ -1,0 +1,67 @@
+{
+    "provider": {
+      "name": "Example Store",
+      "domain": "example.com",
+      "description": "Online retailer of eco-friendly products",
+      "branding": {
+        "colors": {
+          "primary": "#3498db",
+          "secondary": "#2ecc71"
+        },
+        "logo": {
+          "vector": "https://example.com/logo.svg"
+        },
+        "typography": {
+          "primary": "Helvetica Neue"
+        },
+        "tone": "professional"
+      }
+    },
+    "referrals": [
+      {
+        "name": "Eco Shipping",
+        "domain": "ecoshipping.com",
+        "relationship": "trusted"
+      },
+      {
+        "name": "Green Packaging",
+        "domain": "greenpack.co",
+        "relationship": "partner"
+      },
+      {
+        "name": "Sustainability Certification",
+        "domain": "eco-cert.org",
+        "relationship": "verified"
+      }
+    ],
+    "capabilities": {
+      "product_search": {
+        "name": "product_search",
+        "description": "Search for products in catalog",
+        "category": "inventory",
+        "operations": ["SEARCH", "GET", "LIST"],
+        "data_file": "products.json"
+      },
+      "customer_lookup": {
+        "name": "customer_lookup",
+        "description": "Look up customer information",
+        "category": "customers",
+        "operations": ["GET", "LIST"],
+        "data_file": "customers.json"
+      },
+      "order_history": {
+        "name": "order_history",
+        "description": "Retrieve customer order history",
+        "category": "orders",
+        "operations": ["GET", "LIST", "SEARCH"],
+        "data_file": "orders.json"
+      },
+      "product_reviews": {
+        "name": "product_reviews",
+        "description": "Get and submit product reviews",
+        "category": "reviews",
+        "operations": ["GET", "LIST", "SEARCH"],
+        "data_file": "reviews.json"
+      }
+    }
+  }

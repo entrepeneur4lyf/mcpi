@@ -1,0 +1,124 @@
+[
+    {
+      "id": "order-5001",
+      "customer_id": "cust-1001",
+      "date": "2024-12-15",
+      "status": "shipped",
+      "items": [
+        {"product_id": "eco-1001", "quantity": 2, "price": 24.99},
+        {"product_id": "eco-1004", "quantity": 1, "price": 14.99}
+      ],
+      "shipping": {
+        "method": "eco-friendly",
+        "carrier": "Green Delivery",
+        "tracking": "GD1234567890",
+        "carbon_offset": true
+      },
+      "payment": {
+        "method": "credit",
+        "last4": "1234",
+        "eco_donation": 2.00
+      },
+      "subtotal": 64.97,
+      "shipping_cost": 5.99,
+      "tax": 5.72,
+      "total": 76.68
+    },
+    {
+      "id": "order-5002",
+      "customer_id": "cust-1002",
+      "date": "2024-12-18",
+      "status": "processing",
+      "items": [
+        {"product_id": "eco-1003", "quantity": 1, "price": 39.99}
+      ],
+      "shipping": {
+        "method": "standard",
+        "carrier": "EcoPost",
+        "carbon_offset": true
+      },
+      "payment": {
+        "method": "paypal",
+        "eco_donation": 0.00
+      },
+      "subtotal": 39.99,
+      "shipping_cost": 4.99,
+      "tax": 3.60,
+      "total": 48.58
+    },
+    {
+      "id": "order-5003",
+      "customer_id": "cust-1003",
+      "date": "2024-12-20",
+      "status": "delivered",
+      "items": [
+        {"product_id": "eco-1002", "quantity": 3, "price": 9.99},
+        {"product_id": "eco-1005", "quantity": 1, "price": 12.99}
+      ],
+      "shipping": {
+        "method": "express",
+        "carrier": "EcoSprint",
+        "tracking": "ES9876543210",
+        "carbon_offset": true
+      },
+      "payment": {
+        "method": "credit",
+        "last4": "5678",
+        "eco_donation": 5.00
+      },
+      "subtotal": 42.96,
+      "shipping_cost": 9.99,
+      "tax": 4.24,
+      "total": 57.19
+    },
+    {
+      "id": "order-5004",
+      "customer_id": "cust-1001",
+      "date": "2025-01-05",
+      "status": "delivered",
+      "items": [
+        {"product_id": "eco-1006", "quantity": 1, "price": 59.99},
+        {"product_id": "eco-1007", "quantity": 2, "price": 18.99}
+      ],
+      "shipping": {
+        "method": "eco-friendly",
+        "carrier": "Green Delivery",
+        "tracking": "GD9876543210",
+        "carbon_offset": true
+      },
+      "payment": {
+        "method": "credit",
+        "last4": "1234",
+        "eco_donation": 3.50
+      },
+      "subtotal": 97.97,
+      "shipping_cost": 0.00,
+      "tax": 8.82,
+      "total": 106.79
+    },
+    {
+      "id": "order-5005",
+      "customer_id": "cust-1004",
+      "date": "2025-01-10",
+      "status": "shipped",
+      "items": [
+        {"product_id": "eco-1008", "quantity": 2, "price": 12.99},
+        {"product_id": "eco-1001", "quantity": 1, "price": 24.99}
+      ],
+      "shipping": {
+        "method": "standard",
+        "carrier": "EcoPost",
+        "tracking": "EP1234567890",
+        "carbon_offset": true
+      },
+      "payment": {
+        "method": "credit",
+        "last4": "4321",
+        "eco_donation": 1.00
+      },
+      "subtotal": 50.97,
+      "shipping_cost": 4.99,
+      "tax": 4.59,
+      "total": 60.55
+    }
+  ]

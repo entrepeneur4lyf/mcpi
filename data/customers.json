@@ -1,0 +1,102 @@
+[
+    {
+      "id": "cust-1001",
+      "name": "Jane Smith",
+      "email": "jane.smith@example.com",
+      "tier": "premium",
+      "since": "2023-05-15",
+      "preferences": {
+        "notifications": true,
+        "theme": "dark",
+        "newsletter": true,
+        "sustainability_focus": "plastic-free"
+      },
+      "address": {
+        "street": "123 Green St",
+        "city": "Ecoville",
+        "state": "CA",
+        "zip": "94123",
+        "country": "US"
+      }
+    },
+    {
+      "id": "cust-1002",
+      "name": "John Doe",
+      "email": "john.doe@example.com",
+      "tier": "standard",
+      "since": "2022-11-30",
+      "preferences": {
+        "notifications": false,
+        "theme": "light",
+        "newsletter": false,
+        "sustainability_focus": "energy-efficient"
+      },
+      "address": {
+        "street": "456 Solar Ave",
+        "city": "Renewable",
+        "state": "OR",
+        "zip": "97401",
+        "country": "US"
+      }
+    },
+    {
+      "id": "cust-1003",
+      "name": "Alex Johnson",
+      "email": "alex.johnson@example.com",
+      "tier": "premium",
+      "since": "2024-01-22",
+      "preferences": {
+        "notifications": true,
+        "theme": "auto",
+        "newsletter": true,
+        "sustainability_focus": "zero-waste"
+      },
+      "address": {
+        "street": "789 Compost Ln",
+        "city": "Greenfield",
+        "state": "WA",
+        "zip": "98101",
+        "country": "US"
+      }
+    },
+    {
+      "id": "cust-1004",
+      "name": "Maria Garcia",
+      "email": "maria.garcia@example.com",
+      "tier": "premium",
+      "since": "2023-08-10",
+      "preferences": {
+        "notifications": true,
+        "theme": "dark",
+        "newsletter": true,
+        "sustainability_focus": "ethical-sourcing"
+      },
+      "address": {
+        "street": "321 Fair Trade Dr",
+        "city": "Ethica",
+        "state": "NY",
+        "zip": "10001",
+        "country": "US"
+      }
+    },
+    {
+      "id": "cust-1005",
+      "name": "David Kim",
+      "email": "david.kim@example.com",
+      "tier": "standard",
+      "since": "2023-03-05",
+      "preferences": {
+        "notifications": false,
+        "theme": "light",
+        "newsletter": true,
+        "sustainability_focus": "carbon-neutral"
+      },
+      "address": {
+        "street": "555 Climate Rd",
+        "city": "Carbonton",
+        "state": "CO",
+        "zip": "80202",
+        "country": "US"
+      }
+    }
+  ]

@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "mcpi-server",
+    "mcpi-client",
+    "mcpi-common"
+]
+
+resolver = "2"

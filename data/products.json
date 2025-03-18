@@ -1,0 +1,82 @@
+[
+    {
+      "id": "eco-1001",
+      "name": "Bamboo Water Bottle",
+      "price": 24.99,
+      "description": "Eco-friendly bamboo water bottle",
+      "inStock": true,
+      "rating": 4.5,
+      "categories": ["drinkware", "sustainable"],
+      "materials": ["bamboo", "stainless steel"]
+    },
+    {
+      "id": "eco-1002",
+      "name": "Recycled Paper Notebook",
+      "price": 9.99,
+      "description": "Notebook made from 100% recycled paper",
+      "inStock": true,
+      "rating": 4.2,
+      "categories": ["stationery", "office"],
+      "materials": ["recycled paper"]
+    },
+    {
+      "id": "eco-1003",
+      "name": "Solar Phone Charger",
+      "price": 39.99,
+      "description": "Portable solar-powered phone charger",
+      "inStock": false,
+      "rating": 4.7,
+      "categories": ["electronics", "outdoor"],
+      "materials": ["recycled plastic", "solar cells"]
+    },
+    {
+      "id": "eco-1004",
+      "name": "Bamboo Cutlery Set",
+      "price": 14.99,
+      "description": "Portable bamboo cutlery set with carrying case",
+      "inStock": true,
+      "rating": 4.8,
+      "categories": ["kitchen", "travel"],
+      "materials": ["bamboo", "organic cotton"]
+    },
+    {
+      "id": "eco-1005",
+      "name": "Recycled Denim Journal",
+      "price": 12.99,
+      "description": "Journal with cover made from recycled denim",
+      "inStock": true,
+      "rating": 4.3,
+      "categories": ["stationery", "fashion"],
+      "materials": ["recycled denim", "recycled paper"]
+    },
+    {
+      "id": "eco-1006",
+      "name": "Hemp Backpack",
+      "price": 59.99,
+      "description": "Durable backpack made from sustainable hemp fibers",
+      "inStock": true,
+      "rating": 4.6,
+      "categories": ["bags", "travel"],
+      "materials": ["hemp", "organic cotton"]
+    },
+    {
+      "id": "eco-1007",
+      "name": "Reusable Silicone Food Bags",
+      "price": 18.99,
+      "description": "Set of reusable silicone food storage bags",
+      "inStock": true,
+      "rating": 4.4,
+      "categories": ["kitchen", "food storage"],
+      "materials": ["food-grade silicone"]
+    },
+    {
+      "id": "eco-1008",
+      "name": "Bamboo Toothbrush Set",
+      "price": 12.99,
+      "description": "Pack of 4 biodegradable bamboo toothbrushes",
+      "inStock": true,
+      "rating": 4.1,
+      "categories": ["bathroom", "personal care"],
+      "materials": ["bamboo", "plant-based bristles"]
+    }
+  ]
