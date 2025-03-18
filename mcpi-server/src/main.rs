@@ -491,7 +491,6 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     // Validate that all referenced data files exist
     for (capability_name, capability) in &config.capabilities {
         let data_path = Path::new("data").join(&capability.data_file);
-        println!("Checking capability: {}, Data file path: {:?}", capability_name, data_path);
         if !data_path.exists() {
             return Err(format!(
                 "Data file '{}' for capability '{}' not found. Please create data/{}", 
