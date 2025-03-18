@@ -1,66 +1,83 @@
-# MCPI Workspace
+# MCPI: Model Context Protocol Integration
 
-This is a Rust workspace for the Model Context Protocol Integration (MCPI) server and client, implementing the MCP (Model Context Protocol) specification for communication between AI models and web services.
+MCPI (Model Context Protocol Integration) is an implementation of the Model Context Protocol (MCP) for AI-web connectivity. It enables AI agents to discover, verify, and transact with web services through a standardized protocol.
 
-## Workspace Structure
-
-```
-mcpi-workspace/
-├── Cargo.toml                      # Workspace configuration
-├── data/                           # Data directory for server
-│   ├── config.json                 # Server configuration
-│   ├── products.json               # Product data
-│   ├── customers.json              # Customer data
-│   └── ...                         # Other data files
-├── mcpi-common/                    # Shared code
-│   ├── Cargo.toml                  # Common dependencies
-│   └── src/
-│       └── lib.rs                  # Common types and utilities
-├── mcpi-server/                    # MCPI server implementation
-│   ├── Cargo.toml                  # Server dependencies
-│   └── src/
-│       └── main.rs                 # Server implementation
-└── mcpi-client/                    # MCPI client example
-    ├── Cargo.toml                  # Client dependencies
-    └── src/
-        └── main.rs                 # Client implementation
-```
+**Official Repository:** [https://github.com/McSpidey/mcpi](https://github.com/McSpidey/mcpi)
 
 ## Overview
 
-This workspace implements:
+MCPI extends the Model Context Protocol to create a bridge between AI agents and web services. This implementation provides:
 
-1. **MCPI Server** - A server implementing both:
-   - REST discovery endpoint at `/mcpi/discover`
-   - MCP-compliant WebSocket endpoint at `/mcpi`
+- WebSocket-based MCP protocol communication
+- RESTful discovery endpoint
+- DNS-based service discovery
+- Data-driven capability definition
+- Generic operation handlers (SEARCH, GET, LIST)
+- Referral relationships between services
 
-2. **MCPI Client** - An example client that:
-   - Uses the REST discovery endpoint
-   - Connects via WebSocket for MCP-based communication
-   - Demonstrates MCP protocol flow
+## Project Structure
 
-3. **Common Code** - Shared types and utilities:
-   - MCP protocol message types
-   - MCPI configuration structures
-   - Capability definitions
+```
+mcpi/
+├── Cargo.toml                # Workspace configuration
+├── data/                     # Data directory for server
+│   ├── config.json           # Main configuration file
+│   ├── products.json         # Product catalog
+│   ├── customers.json        # Customer information
+│   ├── orders.json           # Order history
+│   └── reviews.json          # Product reviews
+├── mcpi-common/              # Shared types and utilities
+│   ├── Cargo.toml
+│   └── src/
+│       └── lib.rs            # Common types and utilities
+├── mcpi-server/              # MCPI server implementation
+│   ├── Cargo.toml
+│   └── src/
+│       └── main.rs           # Server implementation
+└── mcpi-client/              # MCPI client example
+    ├── Cargo.toml
+    └── src/
+        ├── main.rs           # Client implementation
+        └── discovery.rs      # DNS discovery utilities
+```
+
+## Prerequisites
+
+- Rust and Cargo (2021 edition or newer)
+- Internet connection for dependencies
+- Dig command-line tool (for DNS discovery)
 
 ## Getting Started
 
-### Prerequisites
+### Installation
 
-- Rust and Cargo
-- Internet connection for dependencies
-
-### Setup
-
-1. Clone the repository
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/McSpidey/mcpi.git
+   cd mcpi
+   ```
 
 2. Create the `data` directory in the workspace root:
-   ```
+   ```bash
    mkdir -p data
    ```
 
-3. Create the required data files (see "Data Files" section)
+3. Set up the required data files as described in the "Data Files" section below.
+
+### Building
+
+Build the entire workspace:
+
+```bash
+cargo build --workspace
+```
+
+Or build individual components:
+
+```bash
+cargo build -p mcpi-server
+cargo build -p mcpi-client
+```
 
 ### Running the Server
 
@@ -68,252 +85,297 @@ This workspace implements:
 cargo run -p mcpi-server
 ```
 
-The server will validate that all required files exist before starting.
+The server will start at `http://localhost:3000` with the following endpoints:
+- WebSocket endpoint: `ws://localhost:3000/mcpi`
+- REST discovery endpoint: `http://localhost:3000/mcpi/discover`
 
-### Running the Client Example
+### Running the Client
 
-```bash
-cargo run -p mcpi-client
-```
+The client has several options for connecting to MCPI servers:
 
-## Data Files
-
-### Required Files
-
-1. `data/config.json` - Main configuration defining provider info and capabilities
-2. Data files for each capability as specified in `config.json`
-
-### config.json Structure
-
-```json
-{
-  "provider": {
-    "name": "Your Service Name",
-    "domain": "yourdomain.com",
-    "description": "Service description",
-    "branding": { ... }
-  },
-  "referrals": [ ... ],
-  "capabilities": {
-    "capability_name": {
-      "name": "capability_name",
-      "description": "Capability description",
-      "category": "category_name",
-      "operations": ["OPERATION1", "OPERATION2"],
-      "data_file": "data_filename.json"
-    }
-  }
-}
-```
-
-## MCP Protocol Implementation
-
-This implementation follows the MCP specification, supporting:
-
-### Supported MCP Methods
-
-- `initialize`: Initialize the connection with capabilities negotiation
-- `ping`: Check connection health
-- `resources/list`: List available resources
-- `resources/read`: Read a specific resource
-- `tools/list`: List available tools
-- `tools/call`: Call a tool with arguments
-
-### JSON-RPC Format
-
-All MCP communication follows the JSON-RPC 2.0 format:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "resources/list",
-  "params": { ... }
-}
-```
-
-## DNS Configuration
-
-For MCPI discovery, set up a DNS TXT record:
-
-```
-_mcp.example.com. IN TXT "v=mcp1 endpoints=wss://mcp1.example.com/mcpi,wss://mcp2.example.com/mcpi capabilities=product_search,customer_lookup,order_history,product_reviews"
-```
-
-## Adding New Capabilities
-
-To add a new capability:
-
-1. Create a data file for the capability (e.g., `data/new_capability.json`)
-2. Add the capability definition to `config.json`
-
-## Building for Production
-
-```bash
-cargo build --release --workspace
-```
-
-This will build optimized binaries for both server and client in the `target/release` directory.
-
-## License
-
-MIT License# MCPI Workspace
-
-This is a Rust workspace for the Model Context Protocol Integration (MCPI) server and client, implementing the MCP (Model Context Protocol) specification for communication between AI models and web services.
-
-## Workspace Structure
-
-```
-mcpi-workspace/
-├── Cargo.toml                      # Workspace configuration
-├── data/                           # Data directory for server
-│   ├── config.json                 # Server configuration
-│   ├── products.json               # Product data
-│   ├── customers.json              # Customer data
-│   └── ...                         # Other data files
-├── mcpi-common/                    # Shared code
-│   ├── Cargo.toml                  # Common dependencies
-│   └── src/
-│       └── lib.rs                  # Common types and utilities
-├── mcpi-server/                    # MCPI server implementation
-│   ├── Cargo.toml                  # Server dependencies
-│   └── src/
-│       └── main.rs                 # Server implementation
-└── mcpi-client/                    # MCPI client example
-    ├── Cargo.toml                  # Client dependencies
-    └── src/
-        └── main.rs                 # Client implementation
-```
-
-## Overview
-
-This workspace implements:
-
-1. **MCPI Server** - A server implementing both:
-   - REST discovery endpoint at `/mcpi/discover`
-   - MCP-compliant WebSocket endpoint at `/mcpi`
-
-2. **MCPI Client** - An example client that:
-   - Uses the REST discovery endpoint
-   - Connects via WebSocket for MCP-based communication
-   - Demonstrates MCP protocol flow
-
-3. **Common Code** - Shared types and utilities:
-   - MCP protocol message types
-   - MCPI configuration structures
-   - Capability definitions
-
-## Getting Started
-
-### Prerequisites
-
-- Rust and Cargo
-- Internet connection for dependencies
-
-### Setup
-
-1. Clone the repository
-
-2. Create the `data` directory in the workspace root:
-   ```
-   mkdir -p data
-   ```
-
-3. Create the required data files (see "Data Files" section)
-
-### Running the Server
-
-```bash
-cargo run -p mcpi-server
-```
-
-The server will validate that all required files exist before starting.
-
-### Running the Client Example
+#### Connect to local server (default):
 
 ```bash
 cargo run -p mcpi-client
 ```
 
+#### Discover server via DNS:
+
+```bash
+cargo run -p mcpi-client -- --domain example.com
+```
+
+#### Connect to specific URL:
+
+```bash
+cargo run -p mcpi-client -- --url ws://example.com/mcpi
+```
+
 ## Data Files
 
-### Required Files
+The server requires a specific set of JSON files in the `data` directory to operate. These files define the server's configuration, capabilities, and data.
 
-1. `data/config.json` - Main configuration defining provider info and capabilities
-2. Data files for each capability as specified in `config.json`
+### 1. `config.json` (Required)
 
-### config.json Structure
+Main configuration file defining provider info, capabilities, and referrals:
 
 ```json
 {
   "provider": {
-    "name": "Your Service Name",
-    "domain": "yourdomain.com",
-    "description": "Service description",
-    "branding": { ... }
+    "name": "Example Store",
+    "domain": "example.com",
+    "description": "Online retailer of eco-friendly products",
+    "branding": {
+      "colors": {
+        "primary": "#3498db",
+        "secondary": "#2ecc71"
+      },
+      "logo": {
+        "vector": "https://example.com/logo.svg"
+      },
+      "typography": {
+        "primary": "Helvetica Neue"
+      },
+      "tone": "professional"
+    }
   },
-  "referrals": [ ... ],
+  "referrals": [
+    {
+      "name": "Eco Shipping",
+      "domain": "ecoshipping.com",
+      "relationship": "trusted"
+    },
+    {
+      "name": "Green Packaging",
+      "domain": "greenpack.co",
+      "relationship": "partner"
+    }
+  ],
   "capabilities": {
-    "capability_name": {
-      "name": "capability_name",
-      "description": "Capability description",
-      "category": "category_name",
-      "operations": ["OPERATION1", "OPERATION2"],
-      "data_file": "data_filename.json"
+    "product_search": {
+      "name": "product_search",
+      "description": "Search for products in catalog",
+      "category": "inventory",
+      "operations": ["SEARCH", "GET", "LIST"],
+      "data_file": "products.json"
+    },
+    "customer_lookup": {
+      "name": "customer_lookup",
+      "description": "Look up customer information",
+      "category": "customers",
+      "operations": ["GET", "LIST"],
+      "data_file": "customers.json"
+    },
+    "order_history": {
+      "name": "order_history",
+      "description": "Retrieve customer order history",
+      "category": "orders",
+      "operations": ["GET", "LIST", "SEARCH"],
+      "data_file": "orders.json"
+    },
+    "product_reviews": {
+      "name": "product_reviews",
+      "description": "Get and submit product reviews",
+      "category": "reviews",
+      "operations": ["GET", "LIST", "SEARCH"],
+      "data_file": "reviews.json"
     }
   }
 }
 ```
 
+### 2. Data Files (Required for each capability)
+
+Each capability references a data file that contains its data. The server validates that all referenced files exist before starting.
+
+Example data file formats:
+
+#### `products.json`
+```json
+[
+  {
+    "id": "eco-1001",
+    "name": "Bamboo Water Bottle",
+    "price": 24.99,
+    "description": "Eco-friendly bamboo water bottle",
+    "inStock": true,
+    "rating": 4.5,
+    "categories": ["drinkware", "sustainable"],
+    "materials": ["bamboo", "stainless steel"]
+  }
+]
+```
+
+#### `customers.json`
+```json
+[
+  {
+    "id": "cust-1001",
+    "name": "Jane Smith",
+    "email": "jane.smith@example.com",
+    "tier": "premium",
+    "since": "2023-05-15",
+    "preferences": {
+      "notifications": true,
+      "theme": "dark"
+    }
+  }
+]
+```
+
+## DNS-Based Discovery
+
+MCPI supports DNS-based discovery that allows clients to find MCPI servers using DNS TXT records:
+
+### Setting Up DNS TXT Records
+
+1. Create a TXT record for your domain:
+   - **NAME**: `_mcp` 
+   - **TYPE**: `TXT`
+   - **CONTENT**: `v=mcp1 url=https://api.example.com/mcpi/discover`
+
+### Discovery Process
+
+1. Client queries DNS for `_mcp.example.com` TXT record
+2. Client extracts the discovery URL (`url=...`)
+3. Client makes HTTP request to this discovery URL
+4. Server responds with full MCPI capabilities
+5. Client connects to WebSocket endpoint for MCP protocol
+
+### Testing DNS Setup
+
+Test your DNS TXT record using the `dig` command:
+
+```bash
+dig +short TXT _mcp.example.com
+```
+
 ## MCP Protocol Implementation
 
-This implementation follows the MCP specification, supporting:
+This implementation follows the Model Context Protocol (MCP) specification:
 
 ### Supported MCP Methods
 
-- `initialize`: Initialize the connection with capabilities negotiation
-- `ping`: Check connection health
+- `initialize`: Initialize the connection
 - `resources/list`: List available resources
 - `resources/read`: Read a specific resource
-- `tools/list`: List available tools
-- `tools/call`: Call a tool with arguments
+- `tools/list`: List available tools 
+- `tools/call`: Execute a capability
+- `ping`: Check connection health
 
-### JSON-RPC Format
+### Example Request/Response
 
-All MCP communication follows the JSON-RPC 2.0 format:
-
+Initialize request:
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1,
-  "method": "resources/list",
-  "params": { ... }
+  "method": "initialize",
+  "params": {
+    "clientInfo": {
+      "name": "MCPI Test Client",
+      "version": "0.1.0"
+    },
+    "protocolVersion": "0.1.0",
+    "capabilities": {
+      "sampling": {}
+    }
+  }
 }
 ```
 
-## DNS Configuration
-
-For MCPI discovery, set up a DNS TXT record:
-
-```
-_mcp.example.com. IN TXT "v=mcp1 endpoints=wss://mcp1.example.com/mcpi,wss://mcp2.example.com/mcpi capabilities=product_search,customer_lookup,order_history,product_reviews"
+Tool call request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "product_search",
+    "arguments": {
+      "operation": "SEARCH",
+      "query": "bamboo"
+    }
+  }
+}
 ```
 
 ## Adding New Capabilities
 
-To add a new capability:
+To add a new capability to the server:
 
-1. Create a data file for the capability (e.g., `data/new_capability.json`)
-2. Add the capability definition to `config.json`
+1. Create a data file for the capability (e.g., `new_capability.json`)
+2. Add the capability definition to `config.json`:
+   ```json
+   "new_capability": {
+     "name": "new_capability",
+     "description": "Description of new capability",
+     "category": "category_name",
+     "operations": ["SEARCH", "GET", "LIST"],
+     "data_file": "new_capability.json"
+   }
+   ```
+3. Restart the server
 
-## Building for Production
+## Architecture
 
-```bash
-cargo build --release --workspace
-```
+### Server Design
 
-This will build optimized binaries for both server and client in the `target/release` directory.
+The server implements a generic capability execution engine that:
+1. Loads capability definitions from `config.json`
+2. Validates that all data files exist
+3. Exposes capabilities as both resources and tools
+4. Handles standard operations (SEARCH, GET, LIST) generically
+5. Allows for complete separation of code and data
+
+### Client Design
+
+The client implements:
+1. DNS-based discovery
+2. HTTP-based capability discovery
+3. WebSocket-based MCP protocol communication
+4. Command-line interface with multiple connection options
+
+## Extending the Implementation
+
+This implementation can be extended in several ways:
+
+1. **Authentication**: Add JWT or OAuth authentication
+2. **Custom Operations**: Add non-standard operations beyond SEARCH, GET, LIST
+3. **Database Integration**: Replace file-based storage with database access
+4. **Caching**: Add caching for improved performance
+5. **Economic Framework**: Implement USDC-based reverse fees described in MCPI spec
+
+## Troubleshooting
+
+### Server Issues
+
+- **Missing Data Files**: Ensure all data files referenced in `config.json` exist in the `data` directory
+- **JSON Formatting**: Validate JSON files using a tool like `jq`
+- **Permission Issues**: Ensure the server has read access to the data files
+
+### Client Issues
+
+- **DNS Discovery**: Verify TXT records with `dig +short TXT _mcp.example.com`
+- **Connection Errors**: Check network connectivity and server status
+- **WebSocket Issues**: Verify that the server's WebSocket endpoint is accessible
+
+## Contributing
+
+We welcome contributions to the MCPI project! To contribute:
+
+1. Fork the repository on GitHub
+2. Create a feature branch
+3. Implement your changes
+4. Submit a pull request
+
+Please ensure your code follows the project's style and includes appropriate tests.
 
 ## License
 
-MIT License
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- Based on the Model Context Protocol specification
+- Inspired by the need for standardized AI-web connectivity

@@ -5,12 +5,71 @@ use mcpi_common::{
 use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use std::error::Error;
+use clap::{Arg, Command};
+mod discovery;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Parse command line arguments
+    let matches = Command::new("MCPI Client")
+        .version("0.1.0")
+        .author("MCPI Team")
+        .about("Model Context Protocol Integration Client")
+        .arg(Arg::new("domain")
+            .short('d')
+            .long("domain")
+            .value_name("DOMAIN")
+            .help("Domain to discover MCPI services from (uses DNS TXT records)")
+            .required(false))
+        .arg(Arg::new("url")
+            .short('u')
+            .long("url")
+            .value_name("URL")
+            .help("Direct URL to MCPI server (bypasses DNS discovery)")
+            .required(false))
+        .get_matches();
+
+    let mut discovery_url = String::from("http://localhost:3001/mcpi/discover");
+    let mut ws_url = String::from("ws://localhost:3001/mcpi");
+    
+    // Check if we should use DNS discovery
+    if let Some(domain) = matches.get_one::<String>("domain") {
+        println!("Performing DNS-based discovery for domain: {}", domain);
+        
+        match discovery::discover_mcp_services(domain).await {
+            Ok(service_info) => {
+                println!("Discovered MCP service:");
+                println!("  Version: {}", service_info.version);
+                println!("  Endpoint: {}", service_info.endpoint);
+                
+                // The TXT record gives us the discovery URL, which we use to get more details
+                discovery_url = service_info.endpoint;
+                
+                // We'll derive the WebSocket URL after making the discovery request
+                println!("Using discovery endpoint: {}", discovery_url);
+            },
+            Err(e) => {
+                println!("DNS discovery failed: {}. Falling back to default URL.", e);
+            }
+        }
+    } else if let Some(url) = matches.get_one::<String>("url") {
+        // If user provides a direct WebSocket URL
+        ws_url = url.clone();
+        
+        // Try to construct a discovery URL from the WebSocket URL
+        if ws_url.starts_with("wss://") {
+            discovery_url = ws_url.replace("wss://", "https://").replace("/mcpi", "/mcpi/discover");
+        } else if ws_url.starts_with("ws://") {
+            discovery_url = ws_url.replace("ws://", "http://").replace("/mcpi", "/mcpi/discover");
+        }
+        
+        println!("Using provided server URL: {}", ws_url);
+        println!("Derived discovery URL: {}", discovery_url);
+    }
+    
     // First, use the HTTP discovery endpoint to verify the service
     println!("Discovering MCPI service capabilities via HTTP...");
-    let discovery_resp = discover_service_http().await?;
+    let discovery_resp = discover_service_http(&discovery_url).await?;
     
     println!("Connected to: {} ({})", discovery_resp.provider.name, discovery_resp.provider.domain);
     println!("Mode: {}", discovery_resp.mode);
@@ -26,9 +85,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("  - {} ({}): {}", ref_info.name, ref_info.domain, ref_info.relationship);
     }
     
+    // If we're using DNS discovery, derive the WebSocket URL from the discovery URL
+    if matches.contains_id("domain") && !matches.contains_id("url") {
+        // We don't need to use the domain directly, just derive the WebSocket URL
+        if discovery_url.starts_with("https://") {
+            ws_url = discovery_url.replace("https://", "wss://").replace("/mcpi/discover", "/mcpi");
+        } else if discovery_url.starts_with("http://") {
+            ws_url = discovery_url.replace("http://", "ws://").replace("/mcpi/discover", "/mcpi");
+        }
+        
+        println!("\nDerived WebSocket URL for connection: {}", ws_url);
+    }
+    
     // Now connect via WebSocket for MCP protocol
     println!("\nConnecting to MCPI service via WebSocket (MCP protocol)...");
-    let (ws_stream, _) = connect_async("ws://localhost:3001/mcpi").await?;
+    println!("Connecting to: {}", ws_url);
+    let (ws_stream, _) = connect_async(&ws_url).await?;
     println!("WebSocket connection established");
     
     // Split the WebSocket stream
@@ -105,7 +177,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         id: json!(3),
         method: "resources/read".to_string(),
         params: Some(json!({
-            "uri": "mcpi://example.com/resources/products.json"
+            "uri": format!("mcpi://{}/resources/products.json", discovery_resp.provider.domain)
         })),
     };
     
@@ -293,10 +365,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn discover_service_http() -> Result<DiscoveryResponse, Box<dyn Error>> {
+async fn discover_service_http(url: &str) -> Result<DiscoveryResponse, Box<dyn Error>> {
     let client = reqwest::Client::new();
     let resp = client
-        .get("http://localhost:3001/mcpi/discover")
+        .get(url)
         .send()
         .await?
         .json::<DiscoveryResponse>()
