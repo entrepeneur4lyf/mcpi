@@ -2,9 +2,10 @@
 
 MCPI (Model Context Protocol Integration) is an implementation of the Model Context Protocol (MCP) for AI-web connectivity. It enables AI agents to discover, verify, and transact with web services through a standardized protocol, now featuring a flexible plugin architecture.
 
-**Official Websitr**
+**Official Website**
 [https://mcpintegrate.com]
 (https://mcpintegrate.com)
+
 **Official Repository:** [https://github.com/McSpidey/mcpi](https://github.com/McSpidey/mcpi)
 
 ## Overview
