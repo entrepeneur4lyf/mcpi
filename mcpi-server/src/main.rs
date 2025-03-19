@@ -18,17 +18,32 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+// Define paths as constants
+const CONFIG_FILE_PATH: &str = "data/config.json";
+const DATA_PATH: &str = "data/mock";
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    // Create data directory if it doesn't exist
-    let data_dir = Path::new("data");
+    // Create config and data directories if they don't exist
+    let config_file = Path::new(CONFIG_FILE_PATH);
+    let data_dir = Path::new(DATA_PATH);
+    
+    if !config_file.exists() {
+        let config_dir = config_file.parent().unwrap();
+        if !config_dir.exists() {
+            fs::create_dir_all(config_dir)?;
+        }
+        tracing::warn!("Config file not found. Please create '{}'.", CONFIG_FILE_PATH);
+        return Err("No configuration file found. Please create config file to continue.".into());
+    }
+    
     if !data_dir.exists() {
         fs::create_dir_all(data_dir)?;
-        tracing::warn!("Data directory created. Please place your config.json and data files in the 'data' directory.");
-        return Err("No configuration files found. Please add data files to continue.".into());
+        tracing::warn!("Data directory created. Please place your data files in the '{}'.", DATA_PATH);
+        return Err("No data files found. Please add data files to continue.".into());
     }
 
     // Load configuration
@@ -219,8 +234,8 @@ fn handle_read_resource(request: &MCPRequest) -> String {
             if parts.len() >= 4 {
                 let filename = parts.last().unwrap();
                 
-                // Load resource data
-                let data_path = Path::new("data").join(filename);
+                // Load resource data from the DATA_PATH
+                let data_path = Path::new(DATA_PATH).join(filename);
                 if data_path.exists() {
                     match fs::read_to_string(data_path) {
                         Ok(content) => {
@@ -414,8 +429,8 @@ fn execute_capability(
     operation: &str,
     params: &Value,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    // Load data from the configured data file
-    let data_path = Path::new("data").join(&capability.data_file);
+    // Load data from the configured data file in DATA_PATH
+    let data_path = Path::new(DATA_PATH).join(&capability.data_file);
     let data = fs::read_to_string(data_path)?;
     let data: Value = serde_json::from_str(&data)?;
     
@@ -479,7 +494,7 @@ fn execute_capability(
 
 // Helper function to load configuration
 fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let config_path = Path::new("data/config.json");
+    let config_path = Path::new(CONFIG_FILE_PATH);
     
     if !config_path.exists() {
         return Err("Config file not found. Please create data/config.json".into());
@@ -490,11 +505,11 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     
     // Validate that all referenced data files exist
     for (capability_name, capability) in &config.capabilities {
-        let data_path = Path::new("data").join(&capability.data_file);
+        let data_path = Path::new(DATA_PATH).join(&capability.data_file);
         if !data_path.exists() {
             return Err(format!(
-                "Data file '{}' for capability '{}' not found. Please create data/{}", 
-                capability.data_file, capability_name, capability.data_file
+                "Data file '{}' for capability '{}' not found. Please create {}/{}", 
+                capability.data_file, capability_name, DATA_PATH, capability.data_file
             ).into());
         }
     }
