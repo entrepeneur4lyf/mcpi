@@ -53,6 +53,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize plugin registry
     let registry = Arc::new(PluginRegistry::new());
     
+    // Load configuration to get capability details
+    let config_data = fs::read_to_string(config_file)?;
+    let config: Value = serde_json::from_str(&config_data)?;
+    
+    // Extract capabilities from config for future reference
+    let capabilities = match config.get("capabilities") {
+        Some(caps) => caps.clone(),
+        None => {
+            tracing::error!("No capabilities found in configuration file");
+            return Err("No capabilities defined in configuration".into());
+        }
+    };
+    
     // Load and register website plugin
     let website_plugin = match WebsitePlugin::new(CONFIG_FILE_PATH, DATA_PATH) {
         Ok(plugin) => plugin,
@@ -66,28 +79,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let provider_info = website_plugin.get_provider_info();
     let referrals = website_plugin.get_referrals();
     
-    // Get all individual plugins and register them
-    for plugin in website_plugin.get_plugins() {
-        let plugin_name = plugin.name().to_string();
-        
-        // Create an owned Arc for each plugin
-        let plugin_arc: Arc<dyn McpPlugin> = Arc::new(
-            mcpi_common::JsonDataPlugin::new(
-                plugin.name(),
-                plugin.description(),
-                plugin.category(),
-                plugin.supported_operations(),
-                &format!("{}.json", plugin_name), // Assuming data files are named after plugins
-                DATA_PATH,
-            )
-        );
-        
-        if let Err(e) = registry.register_plugin(plugin_arc) {
-            tracing::error!("Failed to register plugin '{}': {}", plugin_name, e);
-            return Err(e.into());
+    // Register all capabilities from the configuration as individual plugins
+    if let Some(caps_obj) = capabilities.as_object() {
+        for (cap_name, cap_config) in caps_obj {
+            let name = match cap_config.get("name").and_then(|n| n.as_str()) {
+                Some(n) => n.to_string(),
+                None => cap_name.clone(),
+            };
+            
+            let description = cap_config.get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("No description available")
+                .to_string();
+            
+            let category = cap_config.get("category")
+                .and_then(|c| c.as_str())
+                .unwrap_or("misc")
+                .to_string();
+            
+            let operations = cap_config.get("operations")
+                .and_then(|o| o.as_array())
+                .map(|ops_array| {
+                    ops_array.iter()
+                        .filter_map(|op| op.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_else(|| vec!["SEARCH".to_string(), "GET".to_string(), "LIST".to_string()]);
+            
+            let data_file = cap_config.get("data_file")
+                .and_then(|f| f.as_str())
+                .unwrap_or(&format!("{}.json", name))
+                .to_string();
+            
+            // Validate that the data file exists
+            let full_data_path = Path::new(DATA_PATH).join(&data_file);
+            if !full_data_path.exists() {
+                tracing::error!("Data file not found for capability '{}': {}", 
+                    name, full_data_path.display());
+                return Err(format!("Data file not found: {}", full_data_path.display()).into());
+            }
+            
+            // Create and register this plugin
+            let plugin: Arc<dyn McpPlugin> = Arc::new(
+                mcpi_common::JsonDataPlugin::new(
+                    &name,
+                    &description,
+                    &category,
+                    operations,
+                    &data_file,
+                    DATA_PATH,
+                )
+            );
+            
+            if let Err(e) = registry.register_plugin(plugin) {
+                tracing::error!("Failed to register plugin '{}': {}", name, e);
+                return Err(e.into());
+            }
+            
+            tracing::info!("Registered plugin: {}", name);
         }
-        
-        tracing::info!("Registered plugin: {}", plugin_name);
     }
     
     // Register weather plugin

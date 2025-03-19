@@ -33,14 +33,15 @@ impl JsonDataPlugin {
         }
     }
     
-    pub fn load_data(&self) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-        let data_path = Path::new(&self.data_path).join(&self.data_file);
-        info!("Loading data from file: {}", data_path.display());
-        
-        let data = fs::read_to_string(data_path)?;
-        let parsed: Value = serde_json::from_str(&data)?;
-        Ok(parsed)
-    }
+// In mcpi-common/src/json_plugin.rs
+pub fn load_data(&self) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let data_path = Path::new(&self.data_path).join(&self.data_file);
+    info!("Loading data from file: {}", data_path.display());
+    
+    let data = fs::read_to_string(data_path)?;
+    let parsed: Value = serde_json::from_str(&data)?;
+    Ok(parsed)
+}
 }
 
 impl McpPlugin for JsonDataPlugin {
