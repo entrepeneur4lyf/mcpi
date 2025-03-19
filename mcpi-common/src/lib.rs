@@ -4,10 +4,12 @@ use std::collections::HashMap;
 // Define modules
 pub mod plugin;
 pub mod json_plugin;
+pub mod plugin_factory;
 
 // Re-export for convenience
 pub use plugin::{McpPlugin, PluginResult};
 pub use json_plugin::JsonDataPlugin;
+pub use plugin_factory::PluginFactory;
 
 // Protocol version
 pub const MCPI_VERSION: &str = "0.1.0";

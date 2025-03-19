@@ -35,6 +35,13 @@
       }
     ],
     "capabilities": {
+      "website_content": {
+  "name": "website_content",
+  "description": "Access website content including news, about page, contact info, and more",
+  "category": "content",
+  "operations": ["GET", "LIST", "SEARCH"],
+  "data_file": "website_content.json"
+},
       "product_search": {
         "name": "product_search",
         "description": "Search for products in catalog",

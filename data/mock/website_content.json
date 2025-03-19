@@ -1,0 +1,197 @@
+[
+    {
+      "id": "about",
+      "title": "About Us",
+      "content": "Example Store was founded in 2020 with a simple mission: make eco-friendly products accessible to everyone. Our team of sustainability experts carefully selects each product in our catalog to ensure it meets our strict environmental and ethical standards. We believe that small changes in everyday products can lead to significant positive impacts on our planet.\n\nToday, we serve over 50,000 customers worldwide and have helped reduce plastic waste by an estimated 35 tons. Our headquarters in Portland, Oregon is powered entirely by renewable energy, and we're proud to be a certified B Corporation.",
+      "last_updated": "2024-12-01",
+      "sections": [
+        {
+          "heading": "Our Mission",
+          "content": "To provide sustainable alternatives to everyday products that reduce environmental impact without compromising on quality or accessibility."
+        },
+        {
+          "heading": "Our Values",
+          "content": "Sustainability, Transparency, Quality, Community"
+        },
+        {
+          "heading": "Our Team",
+          "content": "Our team consists of environmental scientists, product designers, and retail experts who share a passion for sustainability."
+        }
+      ],
+      "page_type": "about"
+    },
+    {
+      "id": "contact",
+      "title": "Contact Us",
+      "content": "We'd love to hear from you! Get in touch with our team using any of the methods below.",
+      "last_updated": "2025-01-15",
+      "contact_methods": [
+        {
+          "type": "email",
+          "value": "support@example.com",
+          "description": "Customer support - we typically respond within 24 hours"
+        },
+        {
+          "type": "phone",
+          "value": "+1-555-ECO-SHOP",
+          "description": "Monday to Friday, 9am to 5pm Pacific Time"
+        },
+        {
+          "type": "address",
+          "value": "123 Green Street, Portland, OR 97201",
+          "description": "Our headquarters and flagship store"
+        },
+        {
+          "type": "social",
+          "platform": "Instagram",
+          "handle": "@examplestore",
+          "url": "https://instagram.com/examplestore"
+        },
+        {
+          "type": "social",
+          "platform": "Twitter",
+          "handle": "@examplestore",
+          "url": "https://twitter.com/examplestore"
+        }
+      ],
+      "page_type": "contact"
+    },
+    {
+      "id": "news-001",
+      "title": "Example Store Launches Plastic-Free Kitchen Collection",
+      "date": "2025-01-10",
+      "author": "Emma Green",
+      "content": "Today, we're excited to announce our new Plastic-Free Kitchen Collection, featuring over 30 sustainable alternatives to common kitchen items. From bamboo utensils to beeswax food wraps, these products will help you reduce plastic waste without sacrificing functionality.\n\nThe collection was developed after surveying our customers about which areas of their homes they found most challenging to make eco-friendly. The kitchen consistently ranked as the top concern, with food storage and meal preparation being particularly difficult to do sustainably.\n\n\"We spent six months researching and testing these products to ensure they meet our standards for both sustainability and usability,\" says our Product Director, Lee Chen. \"We're particularly proud of our new silicone food storage bags, which have been tested to last for at least five years of regular use.\"\n\nThe entire collection is available online starting today, with select items available in our Portland store next week.",
+      "tags": ["product launch", "kitchen", "plastic-free"],
+      "page_type": "news"
+    },
+    {
+      "id": "news-002",
+      "title": "Eco-Packaging Initiative Reduces Shipping Waste by 40%",
+      "date": "2025-02-05",
+      "author": "David Johnson",
+      "content": "We're thrilled to announce that our new eco-packaging initiative has reduced our shipping waste by an impressive 40% in the first month. By switching to compostable mailers, plastic-free tape, and recycled paper padding, we've significantly reduced the environmental impact of our shipping process.\n\nIn addition to being better for the planet, our new packaging solutions have been well-received by customers. In a recent survey, 92% of respondents rated our packaging as 'excellent' or 'very good' in terms of sustainability, while still providing adequate protection for their purchases.\n\n\"This initiative is just one step in our ongoing journey to minimize our environmental footprint,\" says our Sustainability Officer, Maria Rodriguez. \"We're constantly evaluating every aspect of our business to find opportunities for improvement.\"\n\nNext on our agenda is working with our suppliers to reduce packaging waste before products even reach our warehouse. We've set a goal to reduce incoming packaging waste by 25% by the end of 2025.",
+      "tags": ["sustainability", "packaging", "shipping"],
+      "page_type": "news"
+    },
+    {
+      "id": "news-003",
+      "title": "Example Store Partners with Local Schools for Environmental Education Program",
+      "date": "2025-02-20",
+      "author": "Emma Green",
+      "content": "We're excited to announce our new partnership with the Portland School District to launch 'Green Futures', an environmental education program for middle school students. The program will provide hands-on workshops about sustainability, recycling, and eco-friendly product choices.\n\nOur team will visit 15 schools throughout the spring semester, reaching approximately 2,000 students. Each workshop includes interactive activities designed to make sustainability concepts accessible and engaging for young learners.\n\n\"We believe that educating the next generation is crucial for building a more sustainable future,\" says our Community Outreach Coordinator, James Wilson. \"These students will be making purchasing decisions in just a few years, and we want to help them understand the environmental impact of those choices.\"\n\nAs part of the program, participating schools will receive sustainability starter kits, including recycling bins, compost containers, and educational materials. We're also launching a contest for students to design eco-friendly products, with winners receiving scholarships and the opportunity to see their designs developed into prototypes.",
+      "tags": ["community", "education", "schools"],
+      "page_type": "news"
+    },
+    {
+      "id": "faq",
+      "title": "Frequently Asked Questions",
+      "last_updated": "2025-01-30",
+      "questions": [
+        {
+          "question": "What makes your products eco-friendly?",
+          "answer": "We evaluate products based on multiple factors: sustainable materials, ethical production processes, reduced packaging, durability, and end-of-life considerations. Each product in our catalog must meet our sustainability criteria in at least three of these categories."
+        },
+        {
+          "question": "Do you ship internationally?",
+          "answer": "Yes, we ship to over 40 countries worldwide. International shipping uses carbon-neutral delivery options through our partnership with EcoShipping."
+        },
+        {
+          "question": "What is your return policy?",
+          "answer": "We offer a 30-day satisfaction guarantee on all products. If you're not completely satisfied, you can return unused items for a full refund or exchange."
+        },
+        {
+          "question": "How do you verify the sustainability claims of your products?",
+          "answer": "We use a combination of third-party certifications (like GOTS, FSC, and Fair Trade), supplier documentation, and our own testing to verify all sustainability claims. Our product team regularly visits manufacturing facilities to ensure standards are being met."
+        },
+        {
+          "question": "Do you have a physical store?",
+          "answer": "Yes, our flagship store is located in Portland, Oregon. We also have pop-up shops at various sustainability events throughout the year."
+        }
+      ],
+      "page_type": "faq"
+    },
+    {
+      "id": "shipping",
+      "title": "Shipping & Delivery",
+      "content": "We're committed to making your shipping experience as eco-friendly as possible while ensuring your products arrive safely and quickly.",
+      "last_updated": "2025-01-20",
+      "sections": [
+        {
+          "heading": "Shipping Methods",
+          "content": "We offer standard (5-7 business days) and express (2-3 business days) shipping options. All shipping is carbon-neutral through our partnership with EcoShipping."
+        },
+        {
+          "heading": "Packaging",
+          "content": "All orders are packed in recycled and recyclable or compostable materials. We use paper tape, compostable mailers, and recycled paper padding to protect your items."
+        },
+        {
+          "heading": "International Shipping",
+          "content": "We ship to over 40 countries. International orders typically arrive within 7-14 business days, depending on the destination and customs processing."
+        },
+        {
+          "heading": "Free Shipping",
+          "content": "Orders over $50 qualify for free standard shipping within the United States. International orders over $100 receive discounted shipping rates."
+        }
+      ],
+      "page_type": "shipping"
+    },
+    {
+      "id": "privacy",
+      "title": "Privacy Policy",
+      "content": "At Example Store, we take your privacy seriously. This policy outlines how we collect, use, and protect your personal information.",
+      "last_updated": "2025-01-05",
+      "sections": [
+        {
+          "heading": "Information We Collect",
+          "content": "We collect information you provide directly to us, such as your name, email address, shipping address, and payment information when you make a purchase. We also collect certain information automatically when you use our website, including your IP address, browser type, and browsing behavior."
+        },
+        {
+          "heading": "How We Use Your Information",
+          "content": "We use your information to process and fulfill your orders, communicate with you about products and services, and improve our website and customer experience. We may also use your information for marketing purposes, such as sending you newsletters or product recommendations."
+        },
+        {
+          "heading": "Information Sharing",
+          "content": "We do not sell or rent your personal information to third parties. We may share your information with service providers who help us operate our business, such as payment processors and shipping companies. We may also share your information if required by law or to protect our rights."
+        },
+        {
+          "heading": "Data Security",
+          "content": "We implement appropriate security measures to protect your personal information from unauthorized access, alteration, or disclosure. All payment information is encrypted using industry-standard protocols."
+        },
+        {
+          "heading": "Your Choices",
+          "content": "You can opt out of receiving marketing communications from us at any time by clicking the 'unsubscribe' link in our emails or contacting us directly. You can also request access to, correction of, or deletion of your personal information by contacting our privacy team."
+        }
+      ],
+      "page_type": "policy"
+    },
+    {
+      "id": "sustainability",
+      "title": "Our Sustainability Commitment",
+      "content": "Sustainability isn't just a buzzword for us—it's at the core of everything we do. Here's how we're working to minimize our environmental impact and maximize our positive contribution.",
+      "last_updated": "2025-01-25",
+      "sections": [
+        {
+          "heading": "Product Selection",
+          "content": "Every product in our catalog undergoes a rigorous sustainability assessment. We evaluate materials, production processes, packaging, durability, and end-of-life options. We partner with suppliers who share our commitment to environmental stewardship and ethical labor practices."
+        },
+        {
+          "heading": "Carbon Neutrality",
+          "content": "We've been carbon neutral since 2023. We've reduced our operational emissions by 60% through renewable energy and efficiency improvements, and we offset the remainder through verified carbon removal projects."
+        },
+        {
+          "heading": "Zero Waste Operations",
+          "content": "Our warehouse and office operate on zero-waste principles, diverting over 98% of our waste from landfills through recycling, composting, and reuse programs. We continuously work to reduce the waste we generate in the first place."
+        },
+        {
+          "heading": "Packaging Revolution",
+          "content": "Our packaging is 100% plastic-free and made from recycled or renewable materials. All of our shipping materials are recyclable or compostable in standard facilities, making it easy for customers to dispose of them responsibly."
+        },
+        {
+          "heading": "Community Impact",
+          "content": "We donate 1% of our annual revenue to environmental nonprofits through our partnership with 1% for the Planet. We also volunteer over 500 hours annually for local environmental restoration projects."
+        }
+      ],
+      "page_type": "sustainability"
+    }
+  ]

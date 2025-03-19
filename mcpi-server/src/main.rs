@@ -7,8 +7,8 @@ use axum::{
 use futures::{sink::SinkExt, stream::StreamExt};
 use axum::extract::ws::{Message, WebSocket};
 use mcpi_common::{
-    CapabilityDescription, DiscoveryResponse, McpPlugin, 
-    MCPRequest, Resource, Tool, MCPI_VERSION
+    CapabilityDescription, DiscoveryResponse, 
+    MCPRequest, Resource, Tool, MCPI_VERSION, PluginFactory
 };
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -24,8 +24,7 @@ mod plugin_registry;
 mod plugins;
 
 use plugin_registry::PluginRegistry;
-use plugins::{WebsitePlugin, WeatherPlugin};
-
+use plugins::WeatherPlugin;
 
 // Define paths as constants
 const CONFIG_FILE_PATH: &str = "data/config.json";
@@ -36,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    // Create config and data directories if they don't exist
+    // Validate config and data directories
     let config_file = Path::new(CONFIG_FILE_PATH);
     let data_dir = Path::new(DATA_PATH);
     
@@ -53,39 +52,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize plugin registry
     let registry = Arc::new(PluginRegistry::new());
     
-    // Load configuration to get capability details
+    // Load configuration file
     let config_data = fs::read_to_string(config_file)?;
     let config: Value = serde_json::from_str(&config_data)?;
     
-    // Extract capabilities from config for future reference
-    let capabilities = match config.get("capabilities") {
-        Some(caps) => caps.clone(),
-        None => {
-            tracing::error!("No capabilities found in configuration file");
-            return Err("No capabilities defined in configuration".into());
-        }
-    };
+    // Extract provider info and referrals for app state
+    let provider_info = config.get("provider").cloned().unwrap_or_else(|| json!({}));
+    let referrals = config.get("referrals").cloned().unwrap_or_else(|| json!([]));
     
-    // Load and register website plugin
-    let website_plugin = match WebsitePlugin::new(CONFIG_FILE_PATH, DATA_PATH) {
-        Ok(plugin) => plugin,
-        Err(e) => {
-            tracing::error!("Failed to initialize website plugin: {}", e);
-            return Err(e);
-        }
-    };
-    
-    // Get provider info for later use
-    let provider_info = website_plugin.get_provider_info();
-    let referrals = website_plugin.get_referrals();
-    
-    // Register all capabilities from the configuration as individual plugins
-    if let Some(caps_obj) = capabilities.as_object() {
+    // Register all plugins from configuration capabilities
+    if let Some(caps_obj) = config.get("capabilities").and_then(|c| c.as_object()) {
         for (cap_name, cap_config) in caps_obj {
-            let name = match cap_config.get("name").and_then(|n| n.as_str()) {
-                Some(n) => n.to_string(),
-                None => cap_name.clone(),
-            };
+            let name = cap_config.get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or(cap_name)
+                .to_string();
             
             let description = cap_config.get("description")
                 .and_then(|d| d.as_str())
@@ -111,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .unwrap_or(&format!("{}.json", name))
                 .to_string();
             
-            // Validate that the data file exists
+            // Validate data file exists
             let full_data_path = Path::new(DATA_PATH).join(&data_file);
             if !full_data_path.exists() {
                 tracing::error!("Data file not found for capability '{}': {}", 
@@ -119,16 +100,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 return Err(format!("Data file not found: {}", full_data_path.display()).into());
             }
             
-            // Create and register this plugin
-            let plugin: Arc<dyn McpPlugin> = Arc::new(
-                mcpi_common::JsonDataPlugin::new(
-                    &name,
-                    &description,
-                    &category,
-                    operations,
-                    &data_file,
-                    DATA_PATH,
-                )
+            // Create plugin using factory
+            let plugin = PluginFactory::create_plugin_from_config(
+                &name,
+                &description,
+                &category,
+                operations,
+                &data_file,
+                DATA_PATH,
             );
             
             if let Err(e) = registry.register_plugin(plugin) {
@@ -138,9 +117,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             
             tracing::info!("Registered plugin: {}", name);
         }
+    } else {
+        tracing::warn!("No capabilities found in configuration");
     }
     
-    // Register weather plugin
+    // Register weather plugin (special case with dynamic data)
     let weather_plugin = Arc::new(WeatherPlugin::new());
     if let Err(e) = registry.register_plugin(weather_plugin) {
         tracing::error!("Failed to register weather plugin: {}", e);
@@ -148,20 +129,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     tracing::info!("Registered plugin: weather_forecast");
 
-    // Create shared state
+    // Create shared application state
     let app_state = Arc::new(AppState { 
         registry: registry.clone(),
         provider_info: provider_info.clone(),
         referrals: referrals.clone(),
     });
 
-    // Build our CORS layer
+    // Build CORS layer
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Build our application with routes
+    // Build application with routes
     let app = Router::new()
         .route("/mcpi", get(ws_handler))
         .route("/mcpi/discover", get(discovery_handler))
@@ -169,9 +150,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .layer(TraceLayer::new_for_http())
         .layer(cors);
 
-    // Run our application
+    // Run the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
-    tracing::info!("listening on {}", addr);
+    tracing::info!("MCPI server listening on {}", addr);
     
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
@@ -491,6 +472,7 @@ fn handle_list_tools(request: &MCPRequest, state: &Arc<AppState>) -> String {
     response.to_string()
 }
 
+// Handle MCP tools/call request
 fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
     info!("Handling tools/call request");
 
