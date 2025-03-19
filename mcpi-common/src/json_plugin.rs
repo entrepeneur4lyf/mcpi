@@ -2,8 +2,9 @@ use crate::plugin::{McpPlugin, PluginResult};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
+use tracing::{error, info, warn};
 
-/// A base implementation for plugins that source data from JSON files
+
 pub struct JsonDataPlugin {
     name: String,
     description: String,
@@ -16,7 +17,7 @@ pub struct JsonDataPlugin {
 impl JsonDataPlugin {
     pub fn new(
         name: &str,
-        description: &str,
+        description: &str, 
         category: &str,
         operations: Vec<String>,
         data_file: &str,
@@ -31,10 +32,11 @@ impl JsonDataPlugin {
             data_path: data_path.to_string(),
         }
     }
-
-    /// Load the underlying data file
+    
     pub fn load_data(&self) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
         let data_path = Path::new(&self.data_path).join(&self.data_file);
+        info!("Loading data from file: {}", data_path.display());
+        
         let data = fs::read_to_string(data_path)?;
         let parsed: Value = serde_json::from_str(&data)?;
         Ok(parsed)
@@ -45,19 +47,19 @@ impl McpPlugin for JsonDataPlugin {
     fn name(&self) -> &str {
         &self.name
     }
-
+    
     fn description(&self) -> &str {
         &self.description
     }
-
+    
     fn category(&self) -> &str {
         &self.category
     }
-
+    
     fn supported_operations(&self) -> Vec<String> {
         self.operations.clone()
     }
-
+    
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -73,7 +75,7 @@ impl McpPlugin for JsonDataPlugin {
                 },
                 "id": {
                     "type": "string",
-                    "description": "ID for GET operation"
+                    "description": "ID for GET operation"  
                 },
                 "field": {
                     "type": "string",
@@ -83,27 +85,38 @@ impl McpPlugin for JsonDataPlugin {
             "required": ["operation"]
         })
     }
-
+    
     fn execute(&self, operation: &str, params: &Value) -> PluginResult {
+        info!("Executing operation '{}' for plugin '{}'", operation, self.name);
+        
         // Check if operation is supported
         if !self.operations.contains(&operation.to_string()) {
-            return Err(format!("Operation '{}' not supported for plugin '{}'", operation, self.name).into());
+            let error_message = format!("Operation '{}' not supported for plugin '{}'", operation, self.name);
+            warn!("{}", error_message);
+            return Err(error_message.into());
         }
-
+        
         // Load data
-        let data = self.load_data()?;
-
+        let data = match self.load_data() {
+            Ok(data) => {
+                info!("Data loaded successfully for plugin '{}'", self.name);
+                data
+            },
+            Err(e) => {
+                error!("Failed to load data for plugin '{}': {}", self.name, e);
+                return Err(format!("Failed to load data for plugin '{}': {}", self.name, e).into());
+            }
+        };
+        
         // Process based on operation
         match operation {
             "SEARCH" => {
                 let query = params.get("query").and_then(|q| q.as_str()).unwrap_or("");
                 let field = params.get("field").and_then(|f| f.as_str()).unwrap_or("name");
                 
-                // Create a longer-lived empty Vec for the unwrap_or case
-                let empty_vec = Vec::new();
-                let items = data.as_array().unwrap_or(&empty_vec);
+                let default_items = Vec::new();
+                let items = data.as_array().unwrap_or(&default_items);
                 
-                // Filter items based on query
                 let filtered_items: Vec<Value> = items
                     .iter()
                     .filter(|item| {
@@ -112,6 +125,8 @@ impl McpPlugin for JsonDataPlugin {
                     })
                     .cloned()
                     .collect();
+                
+                info!("Search operation completed for plugin '{}'. Found {} items.", self.name, filtered_items.len());
                 
                 Ok(json!({
                     "results": filtered_items,
@@ -123,34 +138,44 @@ impl McpPlugin for JsonDataPlugin {
             "GET" => {
                 let id = params.get("id").and_then(|i| i.as_str()).unwrap_or("");
                 
-                // Create a longer-lived empty Vec for the unwrap_or case
-                let empty_vec = Vec::new();
-                let items = data.as_array().unwrap_or(&empty_vec);
+                let default_items = Vec::new();
+                let items = data.as_array().unwrap_or(&default_items);
                 
-                // Find item by ID
                 let item = items
                     .iter()
                     .find(|i| i.get("id").and_then(|id_val| id_val.as_str()) == Some(id))
                     .cloned();
                 
                 match item {
-                    Some(i) => Ok(i),
-                    None => Ok(json!({
-                        "error": "Item not found",
-                        "id": id
-                    }))
+                    Some(i) => {
+                        info!("Get operation completed for plugin '{}'. Found item with ID: {}", self.name, id);
+                        Ok(i)
+                    },
+                    None => {
+                        warn!("Item not found for plugin '{}' with ID: {}", self.name, id);
+                        Ok(json!({
+                            "error": "Item not found",
+                            "id": id
+                        }))
+                    }
                 }
             },
             "LIST" => {
+                info!("List operation completed for plugin '{}'. Returning all items.", self.name);
+                
                 Ok(json!({
                     "results": data,
                     "count": data.as_array().map(|a| a.len()).unwrap_or(0)
                 }))
             },
-            _ => Err(format!("Unsupported operation '{}'", operation).into())
+            _ => {
+                let error_message = format!("Unsupported operation '{}'", operation);
+                warn!("{}", error_message);
+                Err(error_message.into())
+            }
         }
     }
-
+    
     fn get_resources(&self) -> Vec<(String, String, Option<String>)> {
         vec![(
             self.name.clone(),

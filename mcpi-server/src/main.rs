@@ -17,11 +17,15 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use std::fs;
+use tracing::{error, info, warn};
+
 mod plugin_registry;
 mod plugins;
 
 use plugin_registry::PluginRegistry;
 use plugins::{WebsitePlugin, WeatherPlugin};
+
 
 // Define paths as constants
 const CONFIG_FILE_PATH: &str = "data/config.json";
@@ -342,9 +346,7 @@ fn handle_list_resources(request: &MCPRequest, state: &Arc<AppState>) -> String 
 }
 
 // Handle MCP resources/read request
-fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    tracing::info!("Handling resources/read request for method: {}", request.method);
-
+fn handle_read_resource(request: &MCPRequest, _state: &Arc<AppState>) -> String {
     if let Some(params) = &request.params {
         if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
             tracing::info!("Resource URI requested: {}", uri);
@@ -353,39 +355,21 @@ fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
             // Format: mcpi://domain/resources/filename.json
             let parts: Vec<&str> = uri.split('/').collect();
             
-            tracing::info!("URI parts: {:?}", parts);
-
             if parts.len() >= 4 {
                 let filename = parts.last().unwrap();
                 
-                tracing::info!("Extracted filename: {}", filename);
-
-                // Try to find a plugin that can handle this resource
-                let filename_base = filename.split('.').next().unwrap_or("");
+                // Construct the full path to the JSON file
+                let data_path = Path::new(DATA_PATH).join(filename);
                 
-                tracing::info!("Extracted filename base: {}", filename_base);
-
-                // Get all plugins once
-                let all_plugins = state.registry.get_all_plugins();
-
-                // Log all available plugins
-                let available_plugins: Vec<String> = all_plugins
-                    .iter()
-                    .map(|p| p.name().to_string())
-                    .collect();
+                // Log the file path
+                tracing::info!("Looking for file: {}", data_path.display());
                 
-                tracing::info!("Available plugins: {:?}", available_plugins);
-
-                // Try to find a plugin where the name contains the filename base
-                let matching_plugin = all_plugins
-                    .iter()
-                    .find(|p| p.name().contains(filename_base));
-
-                if let Some(plugin) = matching_plugin {
-                    tracing::info!("Found matching plugin: {}", plugin.name());
-
-                    // Try to execute a LIST operation to get the resource content
-                    match plugin.execute("LIST", &json!({})) {
+                // Check if the file exists
+                if data_path.exists() {
+                    tracing::info!("File exists: {}", data_path.display());
+                    
+                    // Read the JSON file
+                    match fs::read_to_string(data_path) {
                         Ok(content) => {
                             let response = json!({
                                 "jsonrpc": "2.0",
@@ -394,7 +378,7 @@ fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
                                     "contents": [
                                         {
                                             "uri": uri,
-                                            "text": content.to_string(),
+                                            "text": content,
                                             "mimeType": "application/json"
                                         }
                                     ]
@@ -404,20 +388,20 @@ fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
                             return response.to_string();
                         },
                         Err(e) => {
-                            tracing::error!("Error executing LIST on plugin: {}", e);
+                            tracing::error!("Error reading file: {}", e);
                             return create_error_response(
                                 request.id.clone(),
                                 100,
-                                format!("Error reading resource: {}", e),
+                                format!("Error reading resource file: {}", e),
                             );
                         }
                     }
                 } else {
-                    tracing::error!("No plugin found for filename base: {}", filename_base);
+                    tracing::warn!("File does not exist: {}", data_path.display());
                     return create_error_response(
                         request.id.clone(),
                         100,
-                        format!("No plugin found to handle resource: {}", uri),
+                        format!("Resource file not found: {}", filename),
                     );
                 }
             }
@@ -457,19 +441,25 @@ fn handle_list_tools(request: &MCPRequest, state: &Arc<AppState>) -> String {
     response.to_string()
 }
 
-// Handle MCP tools/call request
 fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
+    info!("Handling tools/call request");
+
     if let Some(params) = &request.params {
         if let Some(tool_name) = params.get("name").and_then(|n| n.as_str()) {
+            info!("Calling tool: {}", tool_name);
+
             if let Some(arguments) = params.get("arguments").and_then(|a| a.as_object()) {
                 // Extract operation
                 let operation = arguments.get("operation")
                     .and_then(|o| o.as_str())
                     .unwrap_or("SEARCH");
-                
+
+                info!("Operation: {}", operation);
+
                 // Execute the plugin operation
                 match state.registry.execute_plugin(tool_name, operation, &json!(arguments)) {
                     Ok(result) => {
+                        info!("Tool execution successful");
                         let response = json!({
                             "jsonrpc": "2.0",
                             "id": request.id,
@@ -486,6 +476,7 @@ fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
                         return response.to_string();
                     },
                     Err(e) => {
+                        error!("Tool execution error: {}", e);
                         let response = json!({
                             "jsonrpc": "2.0",
                             "id": request.id,
@@ -503,15 +494,30 @@ fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
                         return response.to_string();
                     }
                 }
+            } else {
+                warn!("Missing 'arguments' in tools/call request");
+                return create_error_response(
+                    request.id.clone(),
+                    -32602,
+                    "Invalid params for tools/call".to_string(),
+                );
             }
+        } else {
+            warn!("Missing 'name' in tools/call request");
+            return create_error_response(
+                request.id.clone(),
+                -32602,
+                "Invalid params for tools/call".to_string(),
+            );
         }
+    } else {
+        warn!("Missing 'params' in tools/call request");
+        return create_error_response(
+            request.id.clone(),
+            -32602,
+            "Invalid params for tools/call".to_string(),
+        );
     }
-    
-    create_error_response(
-        request.id.clone(),
-        -32602,
-        "Invalid params for tools/call".to_string(),
-    )
 }
 
 // Handle MCP ping request
