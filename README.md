@@ -41,30 +41,6 @@ You can easily extend MCPI by creating your own plugins. Each plugin implements 
 - Executing operations
 - Providing resources
 
-## Project Structure
-
-```
-mcpi/
-├── Cargo.toml                # Workspace configuration
-├── data/                     # Data directory for server
-│   ├── config.json           # Main configuration file
-│   └── mock/                 # Mock data files
-├── mcpi-common/              # Shared types and utilities
-│   └── src/
-│       ├── lib.rs            # Common types and utilities
-│       ├── plugin.rs         # Plugin trait definition
-│       └── json_plugin.rs    # JSON data plugin base
-├── mcpi-server/              # MCPI server implementation
-│   └── src/
-│       ├── main.rs           # Server implementation
-│       ├── plugin_registry.rs # Plugin registry
-│       └── plugins/          # Plugin implementations
-└── mcpi-client/              # MCPI client example
-    └── src/
-        ├── main.rs           # Client implementation
-        └── discovery.rs      # DNS discovery utilities
-```
-
 ## Prerequisites
 
 - Rust and Cargo (2021 edition or newer)
