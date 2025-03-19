@@ -99,7 +99,7 @@ pub struct Tool {
 }
 
 // MCP types for JSON-RPC
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]  // Added Debug derive here
 pub struct MCPRequest {
     pub id: serde_json::Value,
     #[serde(default = "default_jsonrpc")]

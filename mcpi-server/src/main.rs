@@ -343,18 +343,47 @@ fn handle_list_resources(request: &MCPRequest, state: &Arc<AppState>) -> String 
 
 // Handle MCP resources/read request
 fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
+    tracing::info!("Handling resources/read request for method: {}", request.method);
+
     if let Some(params) = &request.params {
         if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
+            tracing::info!("Resource URI requested: {}", uri);
+
             // Extract filename from URI
             // Format: mcpi://domain/resources/filename.json
             let parts: Vec<&str> = uri.split('/').collect();
+            
+            tracing::info!("URI parts: {:?}", parts);
+
             if parts.len() >= 4 {
                 let filename = parts.last().unwrap();
                 
+                tracing::info!("Extracted filename: {}", filename);
+
                 // Try to find a plugin that can handle this resource
-                let plugin_name = filename.split('.').next().unwrap_or("");
+                let filename_base = filename.split('.').next().unwrap_or("");
                 
-                if let Some(plugin) = state.registry.get_plugin(plugin_name) {
+                tracing::info!("Extracted filename base: {}", filename_base);
+
+                // Get all plugins once
+                let all_plugins = state.registry.get_all_plugins();
+
+                // Log all available plugins
+                let available_plugins: Vec<String> = all_plugins
+                    .iter()
+                    .map(|p| p.name().to_string())
+                    .collect();
+                
+                tracing::info!("Available plugins: {:?}", available_plugins);
+
+                // Try to find a plugin where the name contains the filename base
+                let matching_plugin = all_plugins
+                    .iter()
+                    .find(|p| p.name().contains(filename_base));
+
+                if let Some(plugin) = matching_plugin {
+                    tracing::info!("Found matching plugin: {}", plugin.name());
+
                     // Try to execute a LIST operation to get the resource content
                     match plugin.execute("LIST", &json!({})) {
                         Ok(content) => {
@@ -375,6 +404,7 @@ fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
                             return response.to_string();
                         },
                         Err(e) => {
+                            tracing::error!("Error executing LIST on plugin: {}", e);
                             return create_error_response(
                                 request.id.clone(),
                                 100,
@@ -383,6 +413,7 @@ fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
                         }
                     }
                 } else {
+                    tracing::error!("No plugin found for filename base: {}", filename_base);
                     return create_error_response(
                         request.id.clone(),
                         100,
