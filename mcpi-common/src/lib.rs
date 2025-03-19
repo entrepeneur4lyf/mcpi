@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Define modules
+pub mod plugin;
+pub mod json_plugin;
+
+// Re-export for convenience
+pub use plugin::{McpPlugin, PluginResult};
+pub use json_plugin::JsonDataPlugin;
+
 // Protocol version
 pub const MCPI_VERSION: &str = "0.1.0";
 

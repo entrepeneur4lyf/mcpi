@@ -1,6 +1,6 @@
 # MCPI: Model Context Protocol Integration
 
-MCPI (Model Context Protocol Integration) is an implementation of the Model Context Protocol (MCP) for AI-web connectivity. It enables AI agents to discover, verify, and transact with web services through a standardized protocol.
+MCPI (Model Context Protocol Integration) is an implementation of the Model Context Protocol (MCP) for AI-web connectivity. It enables AI agents to discover, verify, and transact with web services through a standardized protocol, now featuring a flexible plugin architecture.
 
 **Official Repository:** [https://github.com/McSpidey/mcpi](https://github.com/McSpidey/mcpi)
 
@@ -11,9 +11,35 @@ MCPI extends the Model Context Protocol to create a bridge between AI agents and
 - WebSocket-based MCP protocol communication
 - RESTful discovery endpoint
 - DNS-based service discovery
-- Data-driven capability definition
+- Plugin architecture for modular capabilities
 - Generic operation handlers (SEARCH, GET, LIST)
 - Referral relationships between services
+
+## Plugin Architecture
+
+The MCPI system uses a plugin architecture that allows for modular and extensible capabilities:
+
+- **Plugins**: Each capability is implemented as a self-contained plugin
+- **Plugin Registry**: Central management of all available plugins
+- **Dynamic Operation**: Plugins can be loaded and configured at runtime
+- **Extensibility**: New capabilities can be added without modifying core code
+
+### Built-in Plugins
+
+MCPI comes with several built-in plugins:
+
+- **Website Plugin**: Provides e-commerce capabilities (products, customers, orders, reviews)
+- **Weather Plugin**: Demonstrates dynamic data generation with simulated weather forecasts
+
+### Custom Plugins
+
+You can easily extend MCPI by creating your own plugins. Each plugin implements the McpPlugin trait, which defines methods for:
+
+- Getting metadata (name, description, category)
+- Listing supported operations
+- Defining input schemas
+- Executing operations
+- Providing resources
 
 ## Project Structure
 
@@ -22,20 +48,18 @@ mcpi/
 ├── Cargo.toml                # Workspace configuration
 ├── data/                     # Data directory for server
 │   ├── config.json           # Main configuration file
-│   ├── products.json         # Product catalog
-│   ├── customers.json        # Customer information
-│   ├── orders.json           # Order history
-│   └── reviews.json          # Product reviews
+│   └── mock/                 # Mock data files
 ├── mcpi-common/              # Shared types and utilities
-│   ├── Cargo.toml
 │   └── src/
-│       └── lib.rs            # Common types and utilities
+│       ├── lib.rs            # Common types and utilities
+│       ├── plugin.rs         # Plugin trait definition
+│       └── json_plugin.rs    # JSON data plugin base
 ├── mcpi-server/              # MCPI server implementation
-│   ├── Cargo.toml
 │   └── src/
-│       └── main.rs           # Server implementation
+│       ├── main.rs           # Server implementation
+│       ├── plugin_registry.rs # Plugin registry
+│       └── plugins/          # Plugin implementations
 └── mcpi-client/              # MCPI client example
-    ├── Cargo.toml
     └── src/
         ├── main.rs           # Client implementation
         └── discovery.rs      # DNS discovery utilities
@@ -85,9 +109,9 @@ cargo build -p mcpi-client
 cargo run -p mcpi-server
 ```
 
-The server will start at `http://localhost:3000` with the following endpoints:
-- WebSocket endpoint: `ws://localhost:3000/mcpi`
-- REST discovery endpoint: `http://localhost:3000/mcpi/discover`
+The server will start at `http://localhost:3001` with the following endpoints:
+- WebSocket endpoint: `ws://localhost:3001/mcpi`
+- REST discovery endpoint: `http://localhost:3001/mcpi/discover`
 
 ### Running the Client
 
@@ -109,6 +133,12 @@ cargo run -p mcpi-client -- --domain example.com
 
 ```bash
 cargo run -p mcpi-client -- --url ws://example.com/mcpi
+```
+
+#### Test a specific plugin:
+
+```bash
+cargo run -p mcpi-client -- --plugin weather_forecast
 ```
 
 ## Data Files
@@ -144,11 +174,6 @@ Main configuration file defining provider info, capabilities, and referrals:
       "name": "Eco Shipping",
       "domain": "ecoshipping.com",
       "relationship": "trusted"
-    },
-    {
-      "name": "Green Packaging",
-      "domain": "greenpack.co",
-      "relationship": "partner"
     }
   ],
   "capabilities": {
@@ -165,20 +190,6 @@ Main configuration file defining provider info, capabilities, and referrals:
       "category": "customers",
       "operations": ["GET", "LIST"],
       "data_file": "customers.json"
-    },
-    "order_history": {
-      "name": "order_history",
-      "description": "Retrieve customer order history",
-      "category": "orders",
-      "operations": ["GET", "LIST", "SEARCH"],
-      "data_file": "orders.json"
-    },
-    "product_reviews": {
-      "name": "product_reviews",
-      "description": "Get and submit product reviews",
-      "category": "reviews",
-      "operations": ["GET", "LIST", "SEARCH"],
-      "data_file": "reviews.json"
     }
   }
 }
@@ -186,42 +197,7 @@ Main configuration file defining provider info, capabilities, and referrals:
 
 ### 2. Data Files (Required for each capability)
 
-Each capability references a data file that contains its data. The server validates that all referenced files exist before starting.
-
-Example data file formats:
-
-#### `products.json`
-```json
-[
-  {
-    "id": "eco-1001",
-    "name": "Bamboo Water Bottle",
-    "price": 24.99,
-    "description": "Eco-friendly bamboo water bottle",
-    "inStock": true,
-    "rating": 4.5,
-    "categories": ["drinkware", "sustainable"],
-    "materials": ["bamboo", "stainless steel"]
-  }
-]
-```
-
-#### `customers.json`
-```json
-[
-  {
-    "id": "cust-1001",
-    "name": "Jane Smith",
-    "email": "jane.smith@example.com",
-    "tier": "premium",
-    "since": "2023-05-15",
-    "preferences": {
-      "notifications": true,
-      "theme": "dark"
-    }
-  }
-]
-```
+Each capability references a data file that contains its data. These files should be placed in the `data/mock` directory.
 
 ## DNS-Based Discovery
 
@@ -263,70 +239,41 @@ This implementation follows the Model Context Protocol (MCP) specification:
 - `tools/call`: Execute a capability
 - `ping`: Check connection health
 
-### Example Request/Response
+## Creating New Plugins
 
-Initialize request:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "initialize",
-  "params": {
-    "clientInfo": {
-      "name": "MCPI Test Client",
-      "version": "0.1.0"
-    },
-    "protocolVersion": "0.1.0",
-    "capabilities": {
-      "sampling": {}
-    }
-  }
-}
-```
+To create a new plugin:
 
-Tool call request:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 5,
-  "method": "tools/call",
-  "params": {
-    "name": "product_search",
-    "arguments": {
-      "operation": "SEARCH",
-      "query": "bamboo"
-    }
-  }
-}
-```
+1. Create a new file in `mcpi-server/src/plugins/` (e.g., `my_plugin.rs`)
+2. Implement the McpPlugin trait
+3. Register your plugin in the server's main function
 
-## Adding New Capabilities
+Plugins can be of different types:
 
-To add a new capability to the server:
+1. **Data-driven plugins**: Extend the JsonDataPlugin base class
+2. **Dynamic plugins**: Implement the McpPlugin trait directly
+3. **API wrapper plugins**: Connect to external services
 
-1. Create a data file for the capability (e.g., `new_capability.json`)
-2. Add the capability definition to `config.json`:
-   ```json
-   "new_capability": {
-     "name": "new_capability",
-     "description": "Description of new capability",
-     "category": "category_name",
-     "operations": ["SEARCH", "GET", "LIST"],
-     "data_file": "new_capability.json"
-   }
-   ```
-3. Restart the server
+## Standard Plugin Operations
+
+While plugins can define custom operations, these standard operations are recommended:
+
+- **SEARCH**: Find items matching criteria
+- **GET**: Retrieve a specific item by ID
+- **LIST**: List all available items
+- **CREATE**: Create a new item (for writable plugins)
+- **UPDATE**: Update an existing item (for writable plugins)
+- **DELETE**: Remove an item (for writable plugins)
 
 ## Architecture
 
 ### Server Design
 
-The server implements a generic capability execution engine that:
-1. Loads capability definitions from `config.json`
-2. Validates that all data files exist
-3. Exposes capabilities as both resources and tools
-4. Handles standard operations (SEARCH, GET, LIST) generically
-5. Allows for complete separation of code and data
+The server implements a plugin-based capability execution engine that:
+1. Loads the plugin registry
+2. Registers built-in and configured plugins
+3. Routes MCP protocol methods to appropriate plugins
+4. Handles WebSocket connections and JSON-RPC requests
+5. Provides plugin discovery and introspection
 
 ### Client Design
 
@@ -334,14 +281,14 @@ The client implements:
 1. DNS-based discovery
 2. HTTP-based capability discovery
 3. WebSocket-based MCP protocol communication
-4. Command-line interface with multiple connection options
+4. Plugin-specific testing through command-line interface
 
 ## Extending the Implementation
 
 This implementation can be extended in several ways:
 
-1. **Authentication**: Add JWT or OAuth authentication
-2. **Custom Operations**: Add non-standard operations beyond SEARCH, GET, LIST
+1. **New Plugins**: Add new capabilities by creating new plugins
+2. **Authentication**: Add JWT or OAuth authentication
 3. **Database Integration**: Replace file-based storage with database access
 4. **Caching**: Add caching for improved performance
 5. **Economic Framework**: Implement USDC-based reverse fees described in MCPI spec
@@ -350,7 +297,7 @@ This implementation can be extended in several ways:
 
 ### Server Issues
 
-- **Missing Data Files**: Ensure all data files referenced in `config.json` exist in the `data` directory
+- **Missing Data Files**: Ensure all data files referenced in `config.json` exist in the `data/mock` directory
 - **JSON Formatting**: Validate JSON files using a tool like `jq`
 - **Permission Issues**: Ensure the server has read access to the data files
 

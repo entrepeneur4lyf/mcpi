@@ -7,23 +7,28 @@ use axum::{
 use futures::{sink::SinkExt, stream::StreamExt};
 use axum::extract::ws::{Message, WebSocket};
 use mcpi_common::{
-    CapabilityConfig, CapabilityDescription, Config, DiscoveryResponse, 
+    CapabilityDescription, DiscoveryResponse, McpPlugin, 
     MCPRequest, Resource, Tool, MCPI_VERSION
 };
 use serde_json::{json, Value};
-use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+mod plugin_registry;
+mod plugins;
+
+use plugin_registry::PluginRegistry;
+use plugins::{WebsitePlugin, WeatherPlugin};
+
 // Define paths as constants
 const CONFIG_FILE_PATH: &str = "data/config.json";
 const DATA_PATH: &str = "data/mock";
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
@@ -32,25 +37,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = Path::new(DATA_PATH);
     
     if !config_file.exists() {
-        let config_dir = config_file.parent().unwrap();
-        if !config_dir.exists() {
-            fs::create_dir_all(config_dir)?;
-        }
         tracing::warn!("Config file not found. Please create '{}'.", CONFIG_FILE_PATH);
         return Err("No configuration file found. Please create config file to continue.".into());
     }
     
     if !data_dir.exists() {
-        fs::create_dir_all(data_dir)?;
-        tracing::warn!("Data directory created. Please place your data files in the '{}'.", DATA_PATH);
+        tracing::warn!("Data directory not found. Please create '{}'.", DATA_PATH);
         return Err("No data files found. Please add data files to continue.".into());
     }
 
-    // Load configuration
-    let config = load_config()?;
+    // Initialize plugin registry
+    let registry = Arc::new(PluginRegistry::new());
+    
+    // Load and register website plugin
+    let website_plugin = match WebsitePlugin::new(CONFIG_FILE_PATH, DATA_PATH) {
+        Ok(plugin) => plugin,
+        Err(e) => {
+            tracing::error!("Failed to initialize website plugin: {}", e);
+            return Err(e);
+        }
+    };
+    
+    // Get provider info for later use
+    let provider_info = website_plugin.get_provider_info();
+    let referrals = website_plugin.get_referrals();
+    
+    // Get all individual plugins and register them
+    for plugin in website_plugin.get_plugins() {
+        let plugin_name = plugin.name().to_string();
+        
+        // Create an owned Arc for each plugin
+        let plugin_arc: Arc<dyn McpPlugin> = Arc::new(
+            mcpi_common::JsonDataPlugin::new(
+                plugin.name(),
+                plugin.description(),
+                plugin.category(),
+                plugin.supported_operations(),
+                &format!("{}.json", plugin_name), // Assuming data files are named after plugins
+                DATA_PATH,
+            )
+        );
+        
+        if let Err(e) = registry.register_plugin(plugin_arc) {
+            tracing::error!("Failed to register plugin '{}': {}", plugin_name, e);
+            return Err(e.into());
+        }
+        
+        tracing::info!("Registered plugin: {}", plugin_name);
+    }
+    
+    // Register weather plugin
+    let weather_plugin = Arc::new(WeatherPlugin::new());
+    if let Err(e) = registry.register_plugin(weather_plugin) {
+        tracing::error!("Failed to register weather plugin: {}", e);
+        return Err(e.into());
+    }
+    tracing::info!("Registered plugin: weather_forecast");
 
     // Create shared state
-    let app_state = Arc::new(AppState { config });
+    let app_state = Arc::new(AppState { 
+        registry: registry.clone(),
+        provider_info: provider_info.clone(),
+        referrals: referrals.clone(),
+    });
 
     // Build our CORS layer
     let cors = CorsLayer::new()
@@ -118,7 +167,7 @@ async fn process_mcp_message(message: &str, state: &Arc<AppState>) -> Option<Str
             match request.method.as_str() {
                 "initialize" => Some(handle_initialize(&request, state)),
                 "resources/list" => Some(handle_list_resources(&request, state)),
-                "resources/read" => Some(handle_read_resource(&request)),
+                "resources/read" => Some(handle_read_resource(&request, state)),
                 "tools/list" => Some(handle_list_tools(&request, state)),
                 "tools/call" => Some(handle_call_tool(&request, state)),
                 "ping" => Some(handle_ping(&request)),
@@ -141,25 +190,67 @@ async fn process_mcp_message(message: &str, state: &Arc<AppState>) -> Option<Str
 async fn discovery_handler(
     State(state): State<Arc<AppState>>,
 ) -> Json<DiscoveryResponse> {
-    // Build capability descriptions from config
-    let capability_descriptions: Vec<CapabilityDescription> = state
-        .config
-        .capabilities
-        .values()
-        .map(|cap| CapabilityDescription {
-            name: cap.name.clone(),
-            description: cap.description.clone(),
-            category: cap.category.clone(),
-            operations: cap.operations.clone(),
+    // Extract provider name and domain
+    let provider_name = state.provider_info.get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("MCPI Provider")
+        .to_string();
+    
+    let provider_domain = state.provider_info.get("domain")
+        .and_then(|d| d.as_str())
+        .unwrap_or("example.com")
+        .to_string();
+    
+    let provider_description = state.provider_info.get("description")
+        .and_then(|d| d.as_str())
+        .unwrap_or("MCPI Provider")
+        .to_string();
+    
+    // Build provider from extracted info
+    let provider = mcpi_common::Provider {
+        name: provider_name,
+        domain: provider_domain,
+        description: provider_description,
+        branding: None,
+    };
+    
+    // Extract referrals from state
+    let referrals = if let Some(refs_array) = state.referrals.as_array() {
+        refs_array.iter()
+            .filter_map(|r| {
+                let name = r.get("name").and_then(|n| n.as_str())?;
+                let domain = r.get("domain").and_then(|d| d.as_str())?;
+                let relationship = r.get("relationship").and_then(|rel| rel.as_str())?;
+                
+                Some(mcpi_common::Referral {
+                    name: name.to_string(),
+                    domain: domain.to_string(),
+                    relationship: relationship.to_string(),
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    
+    // Build capability descriptions from plugins
+    let capability_descriptions: Vec<CapabilityDescription> = state.registry
+        .get_all_plugins()
+        .iter()
+        .map(|plugin| CapabilityDescription {
+            name: plugin.name().to_string(),
+            description: plugin.description().to_string(),
+            category: plugin.category().to_string(),
+            operations: plugin.supported_operations(),
         })
         .collect();
 
-    // Create response from provider config
+    // Create response
     let response = DiscoveryResponse {
-        provider: state.config.provider.clone(),
+        provider,
         mode: "active".to_string(),
         capabilities: capability_descriptions,
-        referrals: state.config.referrals.clone(),
+        referrals,
     };
 
     Json(response)
@@ -167,17 +258,31 @@ async fn discovery_handler(
 
 // Handle MCP initialize request
 fn handle_initialize(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    // Collect keys and convert to strings for joining
-    let capability_keys: Vec<String> = state.config.capabilities.keys()
-        .map(|k| k.to_string())
+    // Collect plugin names
+    let capability_names: Vec<String> = state.registry
+        .get_all_plugins()
+        .iter()
+        .map(|plugin| plugin.name().to_string())
         .collect();
+    
+    // Extract provider name
+    let provider_name = state.provider_info.get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("MCPI Provider")
+        .to_string();
+    
+    // Extract provider description
+    let provider_description = state.provider_info.get("description")
+        .and_then(|d| d.as_str())
+        .unwrap_or("MCPI Provider")
+        .to_string();
     
     let response = json!({
         "jsonrpc": "2.0",
         "id": request.id,
         "result": {
             "serverInfo": {
-                "name": state.config.provider.name.clone(),
+                "name": provider_name,
                 "version": MCPI_VERSION
             },
             "protocolVersion": "0.1.0",
@@ -190,9 +295,9 @@ fn handle_initialize(request: &MCPRequest, state: &Arc<AppState>) -> String {
                     "listChanged": true
                 }
             },
-            "instructions": format!("This is an MCPI server for {}. You can access capabilities like: {}.",
-                state.config.provider.description,
-                capability_keys.join(", ")
+            "instructions": format!("This is an MCPI server for {}. You can access plugins like: {}.",
+                provider_description,
+                capability_names.join(", ")
             )
         }
     });
@@ -202,14 +307,26 @@ fn handle_initialize(request: &MCPRequest, state: &Arc<AppState>) -> String {
 
 // Handle MCP resources/list request
 fn handle_list_resources(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    // Convert capabilities to resources
-    let resources: Vec<Resource> = state.config.capabilities.values()
-        .map(|cap| Resource {
-            name: cap.name.clone(),
-            description: Some(cap.description.clone()),
-            uri: format!("mcpi://{}/resources/{}", state.config.provider.domain, cap.data_file),
-            mime_type: Some("application/json".to_string()),
-            size: None,
+    // Extract provider domain
+    let provider_domain = state.provider_info.get("domain")
+        .and_then(|d| d.as_str())
+        .unwrap_or("example.com")
+        .to_string();
+    
+    // Collect resources from all plugins
+    let resources: Vec<Resource> = state.registry
+        .get_all_plugins()
+        .iter()
+        .flat_map(|plugin| {
+            plugin.get_resources().into_iter().map(|(name, uri, description)| {
+                Resource {
+                    name,
+                    description,
+                    uri: uri.replace("provider", &provider_domain),
+                    mime_type: Some("application/json".to_string()),
+                    size: None,
+                }
+            })
         })
         .collect();
     
@@ -225,7 +342,7 @@ fn handle_list_resources(request: &MCPRequest, state: &Arc<AppState>) -> String 
 }
 
 // Handle MCP resources/read request
-fn handle_read_resource(request: &MCPRequest) -> String {
+fn handle_read_resource(request: &MCPRequest, state: &Arc<AppState>) -> String {
     if let Some(params) = &request.params {
         if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
             // Extract filename from URI
@@ -234,10 +351,12 @@ fn handle_read_resource(request: &MCPRequest) -> String {
             if parts.len() >= 4 {
                 let filename = parts.last().unwrap();
                 
-                // Load resource data from the DATA_PATH
-                let data_path = Path::new(DATA_PATH).join(filename);
-                if data_path.exists() {
-                    match fs::read_to_string(data_path) {
+                // Try to find a plugin that can handle this resource
+                let plugin_name = filename.split('.').next().unwrap_or("");
+                
+                if let Some(plugin) = state.registry.get_plugin(plugin_name) {
+                    // Try to execute a LIST operation to get the resource content
+                    match plugin.execute("LIST", &json!({})) {
                         Ok(content) => {
                             let response = json!({
                                 "jsonrpc": "2.0",
@@ -246,7 +365,7 @@ fn handle_read_resource(request: &MCPRequest) -> String {
                                     "contents": [
                                         {
                                             "uri": uri,
-                                            "text": content,
+                                            "text": content.to_string(),
                                             "mimeType": "application/json"
                                         }
                                     ]
@@ -267,7 +386,7 @@ fn handle_read_resource(request: &MCPRequest) -> String {
                     return create_error_response(
                         request.id.clone(),
                         100,
-                        format!("Resource not found: {}", uri),
+                        format!("No plugin found to handle resource: {}", uri),
                     );
                 }
             }
@@ -283,34 +402,15 @@ fn handle_read_resource(request: &MCPRequest) -> String {
 
 // Handle MCP tools/list request
 fn handle_list_tools(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    // Convert capabilities to tools
-    let tools: Vec<Tool> = state.config.capabilities.values()
-        .map(|cap| {
-            // Create input schema based on operations
-            let input_schema = json!({
-                "type": "object",
-                "properties": {
-                    "operation": {
-                        "type": "string",
-                        "enum": cap.operations,
-                        "description": "Operation to perform"
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Query string for SEARCH operation"
-                    },
-                    "id": {
-                        "type": "string",
-                        "description": "ID for GET operation"
-                    }
-                },
-                "required": ["operation"]
-            });
-            
+    // Convert plugins to tools
+    let tools: Vec<Tool> = state.registry
+        .get_all_plugins()
+        .iter()
+        .map(|plugin| {
             Tool {
-                name: cap.name.clone(),
-                description: Some(cap.description.clone()),
-                input_schema,
+                name: plugin.name().to_string(),
+                description: Some(plugin.description().to_string()),
+                input_schema: plugin.input_schema(),
             }
         })
         .collect();
@@ -331,61 +431,46 @@ fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
     if let Some(params) = &request.params {
         if let Some(tool_name) = params.get("name").and_then(|n| n.as_str()) {
             if let Some(arguments) = params.get("arguments").and_then(|a| a.as_object()) {
-                if let Some(capability) = state.config.capabilities.get(tool_name) {
-                    // Extract operation and parameters
-                    let operation = arguments.get("operation").and_then(|o| o.as_str())
-                        .unwrap_or("SEARCH");
-                    
-                    if !capability.operations.contains(&operation.to_string()) {
-                        return create_error_response(
-                            request.id.clone(),
-                            100,
-                            format!("Operation '{}' not supported for tool '{}'", operation, tool_name),
-                        );
+                // Extract operation
+                let operation = arguments.get("operation")
+                    .and_then(|o| o.as_str())
+                    .unwrap_or("SEARCH");
+                
+                // Execute the plugin operation
+                match state.registry.execute_plugin(tool_name, operation, &json!(arguments)) {
+                    Ok(result) => {
+                        let response = json!({
+                            "jsonrpc": "2.0",
+                            "id": request.id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+                                    }
+                                ]
+                            }
+                        });
+                        
+                        return response.to_string();
+                    },
+                    Err(e) => {
+                        let response = json!({
+                            "jsonrpc": "2.0",
+                            "id": request.id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": format!("Error: {}", e)
+                                    }
+                                ],
+                                "isError": true
+                            }
+                        });
+                        
+                        return response.to_string();
                     }
-                    
-                    // Execute capability
-                    match execute_capability(&capability, operation, &json!(arguments)) {
-                        Ok(result) => {
-                            let response = json!({
-                                "jsonrpc": "2.0",
-                                "id": request.id,
-                                "result": {
-                                    "content": [
-                                        {
-                                            "type": "text",
-                                            "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
-                                        }
-                                    ]
-                                }
-                            });
-                            
-                            return response.to_string();
-                        },
-                        Err(e) => {
-                            let response = json!({
-                                "jsonrpc": "2.0",
-                                "id": request.id,
-                                "result": {
-                                    "content": [
-                                        {
-                                            "type": "text",
-                                            "text": format!("Error: {}", e)
-                                        }
-                                    ],
-                                    "isError": true
-                                }
-                            });
-                            
-                            return response.to_string();
-                        }
-                    }
-                } else {
-                    return create_error_response(
-                        request.id.clone(),
-                        100,
-                        format!("Tool not found: {}", tool_name),
-                    );
                 }
             }
         }
@@ -423,101 +508,9 @@ fn create_error_response(id: Value, code: i32, message: String) -> String {
     response.to_string()
 }
 
-// Generic capability execution
-fn execute_capability(
-    capability: &CapabilityConfig,
-    operation: &str,
-    params: &Value,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    // Load data from the configured data file in DATA_PATH
-    let data_path = Path::new(DATA_PATH).join(&capability.data_file);
-    let data = fs::read_to_string(data_path)?;
-    let data: Value = serde_json::from_str(&data)?;
-    
-    // Process based on capability and operation
-    match operation {
-        "SEARCH" => {
-            let query = params.get("query").and_then(|q| q.as_str()).unwrap_or("");
-            let field = params.get("field").and_then(|f| f.as_str()).unwrap_or("name");
-            
-            // Create a longer-lived empty Vec for the unwrap_or case
-            let empty_vec = Vec::new();
-            let items = data.as_array().unwrap_or(&empty_vec);
-            
-            // Filter items based on query
-            let filtered_items: Vec<Value> = items
-                .iter()
-                .filter(|item| {
-                    let field_value = item.get(field).and_then(|f| f.as_str()).unwrap_or("");
-                    query.is_empty() || field_value.to_lowercase().contains(&query.to_lowercase())
-                })
-                .cloned()
-                .collect();
-            
-            Ok(json!({
-                "results": filtered_items,
-                "count": filtered_items.len(),
-                "query": query,
-                "field": field
-            }))
-        },
-        "GET" => {
-            let id = params.get("id").and_then(|i| i.as_str()).unwrap_or("");
-            
-            // Create a longer-lived empty Vec for the unwrap_or case
-            let empty_vec = Vec::new();
-            let items = data.as_array().unwrap_or(&empty_vec);
-            
-            // Find item by ID
-            let item = items
-                .iter()
-                .find(|i| i.get("id").and_then(|id_val| id_val.as_str()) == Some(id))
-                .cloned();
-            
-            match item {
-                Some(i) => Ok(i),
-                None => Ok(json!({
-                    "error": "Item not found",
-                    "id": id
-                }))
-            }
-        },
-        "LIST" => {
-            Ok(json!({
-                "results": data,
-                "count": data.as_array().map(|a| a.len()).unwrap_or(0)
-            }))
-        },
-        _ => Err(format!("Unsupported operation '{}'", operation).into())
-    }
-}
-
-// Helper function to load configuration
-fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let config_path = Path::new(CONFIG_FILE_PATH);
-    
-    if !config_path.exists() {
-        return Err("Config file not found. Please create data/config.json".into());
-    }
-    
-    let config_data = fs::read_to_string(config_path)?;
-    let config: Config = serde_json::from_str(&config_data)?;
-    
-    // Validate that all referenced data files exist
-    for (capability_name, capability) in &config.capabilities {
-        let data_path = Path::new(DATA_PATH).join(&capability.data_file);
-        if !data_path.exists() {
-            return Err(format!(
-                "Data file '{}' for capability '{}' not found. Please create {}/{}", 
-                capability.data_file, capability_name, DATA_PATH, capability.data_file
-            ).into());
-        }
-    }
-    
-    Ok(config)
-}
-
 // Shared application state
 struct AppState {
-    config: Config,
+    registry: Arc<PluginRegistry>,
+    provider_info: Value,
+    referrals: Value,
 }
