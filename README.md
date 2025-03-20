@@ -205,6 +205,11 @@ Test your DNS TXT record using the `dig` command:
 dig +short TXT _mcp.example.com
 ```
 
+Alternatively, you can use Google's DNS resolver to test your setup via a web request:
+
+- **URL**: [Google DNS Resolver](https://dns.google/resolve?name=_mcp.mcpintegrate.com&type=TXT)
+- **Description**: This tool allows you to query DNS records directly through Google's public DNS service. Replace `_mcp.mcpintegrate.com` with your domain to verify the TXT record configuration.
+
 ## MCP Protocol Implementation
 
 This implementation follows the Model Context Protocol (MCP) specification:
