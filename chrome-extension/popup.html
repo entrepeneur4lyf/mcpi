@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MCPI Client</title>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="css/popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Initial state - no MCPI support detected -->
+    <div id="no-mcpi-panel">
+      <div class="status-header">
+        <h1>MCPI Client</h1>
+        <div class="status-badge not-available">Not Available</div>
+      </div>
+      <p>No MCPI support detected on this site.</p>
+      <p class="hint">Visit a website that supports the Model Context Protocol to use this client.</p>
+    </div>
+    
+    <!-- Loading state while connecting -->
+    <div id="connecting-panel" style="display: none;">
+      <div class="status-header">
+        <h1>MCPI Client</h1>
+        <div class="status-badge connecting">Connecting</div>
+      </div>
+      <div class="loading-spinner"></div>
+      <p>Connecting to MCPI service...</p>
+    </div>
+    
+    <!-- MCPI connected state with tools -->
+    <div id="mcpi-connected-panel" style="display: none;">
+      <div class="status-header">
+        <h1>MCPI Client</h1>
+        <div class="status-badge connected">Connected</div>
+      </div>
+      
+      <div id="server-info">
+        <div class="server-header">
+          <h2 id="provider-name">Server Name</h2>
+          <span id="provider-domain">example.com</span>
+        </div>
+        <p id="provider-description">Server description will appear here.</p>
+      </div>
+      
+      <div class="tabs">
+        <div class="tab-buttons">
+          <button id="tab-capabilities" class="tab-button active">Capabilities</button>
+          <button id="tab-tools" class="tab-button">Tools</button>
+          <button id="tab-resources" class="tab-button">Resources</button>
+          <button id="tab-referrals" class="tab-button">Referrals</button>
+        </div>
+        
+        <div class="tab-content">
+          <!-- Capabilities tab -->
+          <div id="panel-capabilities" class="tab-panel active">
+            <h3>Available Capabilities</h3>
+            <div id="capabilities-list" class="list-container"></div>
+          </div>
+          
+          <!-- Tools tab -->
+          <div id="panel-tools" class="tab-panel">
+            <h3>Available Tools</h3>
+            <div id="tools-list" class="list-container"></div>
+          </div>
+          
+          <!-- Resources tab -->
+          <div id="panel-resources" class="tab-panel">
+            <h3>Available Resources</h3>
+            <div id="resources-list" class="list-container"></div>
+          </div>
+          
+          <!-- Referrals tab -->
+          <div id="panel-referrals" class="tab-panel">
+            <h3>Service Referrals</h3>
+            <div id="referrals-list" class="list-container"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Tool execution panel -->
+    <div id="tool-execution-panel" style="display: none;">
+      <div class="panel-header">
+        <h2 id="tool-name">Tool Name</h2>
+        <button id="back-btn" class="btn secondary small">Back</button>
+      </div>
+      
+      <p id="tool-description">Tool description will appear here.</p>
+      
+      <div class="input-group">
+        <label for="operation-select">Operation:</label>
+        <select id="operation-select"></select>
+      </div>
+      
+      <div id="params-container"></div>
+      
+      <button id="execute-btn" class="btn primary">Execute</button>
+      
+      <div id="result-container" style="display: none;">
+        <h3>Result:</h3>
+        <pre id="result-output"></pre>
+      </div>
+    </div>
+  </div>
+  
+  <script src="js/popup.js"></script>
+</body>
+</html>

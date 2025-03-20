@@ -17,6 +17,7 @@ MCPI extends the Model Context Protocol to create a bridge between AI agents and
 - Plugin architecture for modular capabilities
 - Generic operation handlers (SEARCH, GET, LIST)
 - Referral relationships between services
+- Chrome extension for automatic MCPI detection and interaction
 
 ## Plugin Architecture
 
@@ -49,6 +50,7 @@ You can easily extend MCPI by creating your own plugins. Each plugin implements 
 - Rust and Cargo (2021 edition or newer)
 - Internet connection for dependencies
 - Dig command-line tool (for DNS discovery)
+- Google Chrome (for the Chrome extension)
 
 ## Getting Started
 
@@ -119,6 +121,50 @@ cargo run -p mcpi-client -- --url ws://example.com/mcpi
 ```bash
 cargo run -p mcpi-client -- --plugin weather_forecast
 ```
+
+## Chrome Extension
+
+MCPI includes a Chrome extension that automatically detects websites with MCPI support and provides a user-friendly interface for interacting with MCPI services.
+
+### Features
+
+- **Automatic Detection**: Automatically detects websites with MCPI support via DNS TXT records
+- **Visual Indicators**: Shows green icon when MCPI is available, gray when not
+- **Zero-Click Connection**: Automatically connects to MCPI services when the popup is opened
+- **Quick Actions**: Pre-configured example queries for each tool
+- **Tool Explorer**: Browse and use all available tools, resources, and capabilities
+
+### Installing the Chrome Extension
+
+1. **Open Chrome Extensions Page**:
+   - Open Chrome and type `chrome://extensions` in the address bar
+   - Or use the menu (three dots) > More tools > Extensions
+
+2. **Enable Developer Mode**:
+   - Toggle on "Developer mode" in the top right corner of the Extensions page
+
+3. **Load the Extension**:
+   - Click "Load unpacked"
+   - Navigate to the `chrome-extension` folder in the repository
+   - Select the folder
+
+4. **Test the Extension**:
+   - Run the MCPI server locally (`cargo run -p mcpi-server`)
+   - Visit `localhost:3001` in Chrome
+   - The extension icon should turn green, indicating MCPI support
+   - Click the icon to open the interface and interact with the service
+
+### Using the Chrome Extension
+
+1. **Finding MCPI-Enabled Sites**:
+   - The extension icon turns green when you visit a site with MCPI support
+   - A badge with "MCP" appears on the icon
+
+2. **Interacting with MCPI Services**:
+   - Click the extension icon to open the popup interface
+   - Browse available capabilities, tools, and resources in the tabs
+   - Use quick action buttons for common operations
+   - Click a tool name to open its full interface for custom queries
 
 ## Data Files
 
@@ -267,6 +313,15 @@ The client implements:
 3. WebSocket-based MCP protocol communication
 4. Plugin-specific testing through command-line interface
 
+### Chrome Extension Design
+
+The extension implements:
+1. Automatic MCPI detection via DNS TXT records
+2. Visual status indicators via icon color changes
+3. Automatic connection to discovered MCPI services
+4. User-friendly interface for exploring and using MCPI capabilities
+5. Pre-configured quick actions for common operations
+
 ## Extending the Implementation
 
 This implementation can be extended in several ways:
@@ -276,6 +331,7 @@ This implementation can be extended in several ways:
 3. **Database Integration**: Replace file-based storage with database access
 4. **Caching**: Add caching for improved performance
 5. **Economic Framework**: Implement USDC-based reverse fees described in MCPI spec
+6. **Enhanced Chrome Extension**: Add additional features to the extension
 
 ## Troubleshooting
 
@@ -290,6 +346,12 @@ This implementation can be extended in several ways:
 - **DNS Discovery**: Verify TXT records with `dig +short TXT _mcp.example.com`
 - **Connection Errors**: Check network connectivity and server status
 - **WebSocket Issues**: Verify that the server's WebSocket endpoint is accessible
+
+### Chrome Extension Issues
+
+- **Extension Not Detecting MCPI**: Check if the TXT record is correctly set up
+- **Connection Failures**: Verify the WebSocket endpoint is accessible
+- **No Quick Actions**: Ensure the tool names match those expected by the extension
 
 ## Contributing
 
