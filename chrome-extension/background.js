@@ -221,3 +221,168 @@ async function fetchServerDetails(discoveryUrl) {
     return null;
   }
 }
+
+// Connect to MCPI server
+function connectToMcpiServer() {
+  if (!mcpiState || !mcpiState.websocketUrl) {
+    console.error('No WebSocket URL available');
+    showNoMcpiPanel();
+    return;
+  }
+  
+  // Clean up any existing connection before creating a new one
+  if (websocketConnection && websocketConnection.socket) {
+    cleanupWebSocketResources();
+  }
+
+  try {
+    const socket = new WebSocket(mcpiState.websocketUrl);
+    
+    // Set connection timeout
+    const connectionTimeout = setTimeout(() => {
+      if (socket.readyState !== WebSocket.OPEN) {
+        console.log('Connection timed out');
+        socket.close();
+        showNoMcpiPanel();
+      }
+    }, 10000); // 10 seconds connection timeout
+    
+    websocketConnection = {
+      socket: socket,
+      initialized: false,
+      connectionTimeout: connectionTimeout,
+      reconnectAttempts: 0
+    };
+
+    // WebSocket event handlers
+    socket.onopen = function(event) {
+      console.log('WebSocket connection established');
+      
+      // Send initialize request
+      sendJsonRpcRequest('initialize', {
+        clientInfo: {
+          name: 'MCPI Chrome Extension',
+          version: '1.0.0'
+        },
+        protocolVersion: '0.1.0',
+        capabilities: {
+          sampling: {}
+        }
+      });
+      
+      // Set up ping interval to keep connection alive
+      websocketConnection.pingInterval = setInterval(function() {
+        // Only send ping if socket is still open
+        if (socket.readyState === WebSocket.OPEN) {
+          console.log('Sending keepalive ping...');
+          sendJsonRpcRequest('ping');
+        } else {
+          clearInterval(websocketConnection.pingInterval);
+        }
+      }, 30000); // Send ping every 30 seconds
+    };
+    
+    socket.onmessage = function(event) {
+      // Reset inactivity timer on any message received
+      if (websocketConnection.inactivityTimeout) {
+        clearTimeout(websocketConnection.inactivityTimeout);
+      }
+      
+      // Set new inactivity timeout
+      websocketConnection.inactivityTimeout = setTimeout(function() {
+        console.log('Connection inactive for too long, reconnecting...');
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.close();
+        }
+        connectToMcpiServer(); // Attempt to reconnect
+      }, 120000); // 2 minutes of inactivity
+      
+      handleWebSocketMessage(event.data);
+    };
+    
+    socket.onerror = function(error) {
+      console.error('WebSocket error:', error);
+      cleanupWebSocketResources();
+      showNoMcpiPanel();
+    };
+    
+    socket.onclose = function(event) {
+      console.log('WebSocket connection closed:', event.code, event.reason);
+      cleanupWebSocketResources();
+      
+      // If this wasn't a normal closure, try to reconnect
+      if (event.code !== 1000 && event.code !== 1001) {
+        console.log('Abnormal closure, attempting to reconnect in 5 seconds...');
+        setTimeout(connectToMcpiServer, 5000);
+      } else {
+        showNoMcpiPanel();
+      }
+    };
+  } catch (error) {
+    console.error('WebSocket error:', error);
+    showNoMcpiPanel();
+  }
+}
+
+// Clean up WebSocket resources
+function cleanupWebSocketResources() {
+  if (!websocketConnection) return;
+  
+  // Clear all timers
+  if (websocketConnection.connectionTimeout) {
+    clearTimeout(websocketConnection.connectionTimeout);
+  }
+  
+  if (websocketConnection.pingInterval) {
+    clearInterval(websocketConnection.pingInterval);
+  }
+  
+  if (websocketConnection.inactivityTimeout) {
+    clearTimeout(websocketConnection.inactivityTimeout);
+  }
+  
+  // Clear socket reference
+  websocketConnection = null;
+}
+
+// Send JSON-RPC request
+function sendJsonRpcRequest(method, params = null) {
+  if (!websocketConnection || !websocketConnection.socket) {
+    console.error('No active WebSocket connection');
+    return;
+  }
+  
+  // Only proceed if connection is open
+  if (websocketConnection.socket.readyState !== WebSocket.OPEN) {
+    console.error('WebSocket connection not open');
+    return;
+  }
+  
+  const requestId = jsonRpcId++;
+  
+  const request = {
+    jsonrpc: '2.0',
+    id: requestId,
+    method: method
+  };
+  
+  if (params !== null) {
+    request.params = params;
+  }
+  
+  try {
+    websocketConnection.socket.send(JSON.stringify(request));
+    return requestId;
+  } catch (error) {
+    console.error('Error sending WebSocket message:', error);
+    
+    // If we get an error sending, the connection might be broken
+    // Try to reconnect
+    if (websocketConnection.reconnectAttempts < 3) {
+      websocketConnection.reconnectAttempts++;
+      console.log(`Reconnection attempt ${websocketConnection.reconnectAttempts}...`);
+      connectToMcpiServer();
+    }
+    return null;
+  }
+}
