@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Button elements
   const backBtn = document.getElementById('back-btn');
   const executeBtn = document.getElementById('execute-btn');
+  const reconnectBtn = document.getElementById('reconnect-btn');
 
   // Tool execution elements
   const toolName = document.getElementById('tool-name');
@@ -35,10 +36,10 @@ document.addEventListener('DOMContentLoaded', function() {
   // Global state
   let currentTabId = null;
   let mcpiState = null;
-  let websocketConnection = null;
   let toolsData = null;
   let resourcesData = null;
   let currentTool = null;
+  let websocketConnection = null;
   let jsonRpcId = 1;
 
   // Initialize by checking the current tab's MCPI state
@@ -51,6 +52,12 @@ document.addEventListener('DOMContentLoaded', function() {
   // Button click handlers
   backBtn.addEventListener('click', showConnectedPanel);
   executeBtn.addEventListener('click', executeCurrentTool);
+  if (reconnectBtn) {
+    reconnectBtn.addEventListener('click', function() {
+      showConnectingPanel();
+      connectToMcpiServer();
+    });
+  }
 
   // Tab navigation
   tabButtons.forEach(button => {
@@ -76,14 +83,39 @@ document.addEventListener('DOMContentLoaded', function() {
       mcpiState = response;
 
       if (mcpiState && mcpiState.supported) {
-        // MCPI is supported on this site - connect automatically
-        connectToMcpiServer();
+        // MCPI is supported on this site - check if already connected
+        if (mcpiState.connectionStatus && mcpiState.connectionStatus.connected && mcpiState.connectionStatus.initialized) {
+          // Already connected - get data and show connected UI
+          updateServerInfo();
+          requestTools();
+          requestResources();
+          showConnectedPanel();
+        } else {
+          // Not connected or not initialized yet
+          connectToMcpiServer();
+        }
       } else {
         // No MCPI support on this site
         showNoMcpiPanel();
       }
     });
   }
+
+  // Receive messages from background script
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'websocketMessage') {
+      handleWebSocketMessage(message.data);
+    } else if (message.action === 'connectionStatusChanged') {
+      if (message.status.connected && message.status.initialized) {
+        updateServerInfo();
+        requestTools();
+        requestResources();
+        showConnectedPanel();
+      } else if (!message.status.connected) {
+        showDisconnectedState();
+      }
+    }
+  });
 
   // Show "No MCPI" panel
   function showNoMcpiPanel() {
@@ -120,6 +152,41 @@ document.addEventListener('DOMContentLoaded', function() {
     toolExecutionPanel.style.display = 'block';
   }
 
+  // Show disconnected state
+  function showDisconnectedState() {
+    // Create reconnect notification if it doesn't exist
+    let reconnectNotice = document.getElementById('reconnect-notice');
+    if (!reconnectNotice) {
+      reconnectNotice = document.createElement('div');
+      reconnectNotice.id = 'reconnect-notice';
+      reconnectNotice.className = 'disconnect-notice';
+      reconnectNotice.innerHTML = `
+        <div class="status-badge error">Disconnected</div>
+        <p>Connection to MCPI server was lost.</p>
+        <button id="reconnect-now-btn" class="btn primary">Reconnect</button>
+      `;
+      
+      // Insert at the top of whatever panel is visible
+      if (mcpiConnectedPanel.style.display !== 'none') {
+        mcpiConnectedPanel.insertBefore(reconnectNotice, mcpiConnectedPanel.firstChild);
+      } else if (toolExecutionPanel.style.display !== 'none') {
+        toolExecutionPanel.insertBefore(reconnectNotice, toolExecutionPanel.firstChild);
+      }
+      
+      // Add event listener to the reconnect button
+      document.getElementById('reconnect-now-btn').addEventListener('click', function() {
+        // Remove reconnect notice
+        reconnectNotice.remove();
+        
+        // Show connecting panel
+        showConnectingPanel();
+        
+        // Try to reconnect
+        connectToMcpiServer();
+      });
+    }
+  }
+
   // Switch between tabs
   function switchTab(tabName) {
     // Update tab buttons
@@ -149,294 +216,46 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
     
-    // Clean up any existing connection before creating a new one
-    if (websocketConnection && websocketConnection.socket) {
-      cleanupConnectionResources();
-    }
-    
-    try {
-      console.log(`Connecting to ${mcpiState.websocketUrl}...`);
-      const socket = new WebSocket(mcpiState.websocketUrl);
-      
-      // Set a connection timeout
-      const connectionTimeout = setTimeout(() => {
-        if (socket.readyState !== WebSocket.OPEN) {
-          console.log('Connection attempt timed out');
-          socket.close();
-          showNoMcpiPanel();
-        }
-      }, 10000); // 10 seconds timeout
-      
-      websocketConnection = {
-        socket: socket,
-        initialized: false,
-        connectionTimeout: connectionTimeout,
-        lastActivity: Date.now()
-      };
-      
-      // WebSocket event handlers
-      socket.onopen = function(event) {
-        console.log('WebSocket connection established');
-        
-        // Clear connection timeout
-        if (websocketConnection.connectionTimeout) {
-          clearTimeout(websocketConnection.connectionTimeout);
-        }
-        
-        // Send initialize request
-        sendJsonRpcRequest('initialize', {
-          clientInfo: {
-            name: 'MCPI Chrome Extension',
-            version: '1.0.0'
-          },
-          protocolVersion: '0.1.0',
-          capabilities: {
-            sampling: {}
-          }
-        });
-        
-        // Start heartbeat to keep connection alive
-        startHeartbeat();
-        
-        // Start connection health check
-        startConnectionCheck();
-      };
-      
-      socket.onmessage = function(event) {
-        // Update last activity timestamp
-        if (websocketConnection) {
-          websocketConnection.lastActivity = Date.now();
-        }
-        
-        handleWebSocketMessage(event.data);
-      };
-      
-      socket.onerror = function(error) {
-        console.error('WebSocket error:', error);
-        cleanupConnectionResources();
+    // For simplicity, we'll use the background script to manage connections
+    chrome.runtime.sendMessage({
+      action: 'connectToMcpi',
+      tabId: currentTabId
+    }, function(response) {
+      if (!response || !response.success) {
+        console.error('Failed to connect to MCPI server');
         showNoMcpiPanel();
-      };
-      
-      socket.onclose = function(event) {
-        console.log('WebSocket connection closed:', event.code, event.reason);
-        cleanupConnectionResources();
-        
-        // If this wasn't a normal closure, we could attempt to reconnect
-        if (event.code !== 1000 && event.code !== 1001) {
-          console.log('Abnormal closure detected');
-          // We're in the popup which has a short lifecycle,
-          // so we'll let the background script handle reconnection
-          showNoMcpiPanel();
-        } else {
-          showNoMcpiPanel();
-        }
-      };
-    } catch (error) {
-      console.error('WebSocket error:', error);
-      showNoMcpiPanel();
-    }
-  }
-  
-  // Clean up connection resources
-  function cleanupConnectionResources() {
-    if (!websocketConnection) return;
-    
-    // Clear all timers
-    if (websocketConnection.connectionTimeout) {
-      clearTimeout(websocketConnection.connectionTimeout);
-    }
-    
-    // Stop heartbeat and health check
-    stopHeartbeat();
-    stopConnectionCheck();
-    
-    // Clear connection reference
-    websocketConnection = null;
-  }
-  
-  // Start heartbeat to keep connection alive
-  function startHeartbeat() {
-    stopHeartbeat(); // Clear existing interval if any
-    
-    heartbeatInterval = setInterval(() => {
-      if (websocketConnection && 
-          websocketConnection.socket && 
-          websocketConnection.socket.readyState === WebSocket.OPEN) {
-        console.log('Sending heartbeat ping...');
-        sendJsonRpcRequest('ping');
-      } else {
-        stopHeartbeat();
       }
-    }, 30000); // 30 seconds heartbeat
+      // We'll let the message listener handle the rest
+    });
   }
   
-  // Stop heartbeat
-  function stopHeartbeat() {
-    if (heartbeatInterval) {
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = null;
-    }
-  }
-  
-  // Start connection health check
-  function startConnectionCheck() {
-    stopConnectionCheck(); // Clear existing interval if any
-    
-    connectionCheckInterval = setInterval(() => {
-      if (!websocketConnection) {
-        stopConnectionCheck();
-        return;
+  // Update server info
+  function updateServerInfo() {
+    if (mcpiState && mcpiState.serverDetails && mcpiState.serverDetails.provider) {
+      providerName.textContent = mcpiState.serverDetails.provider.name || 'Unknown Server';
+      providerDomain.textContent = mcpiState.serverDetails.provider.domain || '';
+      providerDescription.textContent = mcpiState.serverDetails.provider.description || 'No description available';
+      
+      // Update capabilities if available
+      if (mcpiState.serverDetails.capabilities) {
+        updateCapabilities(mcpiState.serverDetails.capabilities);
       }
       
-      // Check if connection is still active
-      const now = Date.now();
-      const inactivityTime = now - websocketConnection.lastActivity;
-      
-      if (inactivityTime > 60000) { // 1 minute without activity
-        console.log('Connection inactive for too long:', inactivityTime, 'ms');
-        
-        if (websocketConnection.socket.readyState !== WebSocket.OPEN) {
-          console.log('Connection is not open anymore, reconnecting...');
-          cleanupConnectionResources();
-          connectToMcpiServer();
-        } else {
-          // Connection is open but inactive, try a ping
-          console.log('Sending health check ping...');
-          websocketConnection.lastActivity = now; // Reset activity timer
-          sendJsonRpcRequest('ping');
-        }
+      // Update referrals if available
+      if (mcpiState.serverDetails.referrals) {
+        updateReferrals(mcpiState.serverDetails.referrals);
       }
-    }, 15000); // Check every 15 seconds
-  }
-  
-  // Stop connection health check
-  function stopConnectionCheck() {
-    if (connectionCheckInterval) {
-      clearInterval(connectionCheckInterval);
-      connectionCheckInterval = null;
     }
   }
-  
-  // Send JSON-RPC request
-  function sendJsonRpcRequest(method, params = null) {
-    if (!websocketConnection || !websocketConnection.socket) {
-      console.error('No active WebSocket connection');
-      return;
-    }
-    
-    // Only proceed if connection is open
-    if (websocketConnection.socket.readyState !== WebSocket.OPEN) {
-      console.error('WebSocket connection not open (state:', websocketConnection.socket.readyState, ')');
-      return;
-    }
-    
-    const requestId = jsonRpcId++;
-    
-    const request = {
-      jsonrpc: '2.0',
-      id: requestId,
-      method: method
-    };
-    
-    if (params !== null) {
-      request.params = params;
-    }
-    
-    try {
-      websocketConnection.socket.send(JSON.stringify(request));
-      return requestId;
-    } catch (error) {
-      console.error('Error sending WebSocket message:', error);
-      
-      // The connection might be broken, try to reconnect
-      cleanupConnectionResources();
-      connectToMcpiServer();
-      return null;
-    }
-  }
-  
-  // Handle incoming WebSocket message
-  function handleWebSocketMessage(data) {
-    try {
-      const message = JSON.parse(data);
-      
-      // Check for error response
-      if (message.error) {
-        console.error('JSON-RPC error:', message.error);
-        if (resultContainer.style.display === 'block') {
-          resultOutput.textContent = `Error (code ${message.error.code}): ${message.error.message}`;
-        }
-        return;
-      }
-      
-      // Handle successful responses
-      if (message.result) {
-        // Handle initialize response
-        if (!websocketConnection.initialized && message.result.serverInfo) {
-          handleInitializeResult(message.result);
-          return;
-        }
-        
-        // Handle tools/list response
-        if (message.result.tools) {
-          handleToolsResult(message.result.tools);
-          return;
-        }
-        
-        // Handle resources/list response
-        if (message.result.resources) {
-          handleResourcesResult(message.result.resources);
-          return;
-        }
-        
-        // Handle tool execution result
-        if (message.result.content) {
-          handleToolExecutionResult(message.result);
-          return;
-        }
-      }
-    } catch (error) {
-      console.error('Error parsing WebSocket message:', error);
-    }
-  }
-  
-  // Handle initialize result
-  function handleInitializeResult(result) {
-    websocketConnection.initialized = true;
-    
-    console.log('Connected to MCPI server:', result.serverInfo.name, 'v' + result.serverInfo.version);
-    
-    // Update server info in connected panel
-    if (mcpiState && mcpiState.serverDetails) {
-      const provider = mcpiState.serverDetails.provider;
-      providerName.textContent = provider.name;
-      providerDomain.textContent = provider.domain;
-      providerDescription.textContent = provider.description;
-    }
-    
-    // Update UI
-    showConnectedPanel();
-    
-    // Populate capabilities from discovery data
-    if (mcpiState && mcpiState.serverDetails && mcpiState.serverDetails.capabilities) {
-      updateCapabilities(mcpiState.serverDetails.capabilities);
-    }
-    
-    // Populate referrals from discovery data
-    if (mcpiState && mcpiState.serverDetails && mcpiState.serverDetails.referrals) {
-      updateReferrals(mcpiState.serverDetails.referrals);
-    }
-    
-    // Request available tools
-    sendJsonRpcRequest('tools/list');
-    
-    // Request available resources
-    sendJsonRpcRequest('resources/list');
-  }
-  
+
   // Update capabilities listing
   function updateCapabilities(capabilities) {
     capabilitiesList.innerHTML = '';
+    
+    if (!capabilities || capabilities.length === 0) {
+      capabilitiesList.innerHTML = '<p style="padding: 10px; color: var(--neutral-color);">No capabilities available.</p>';
+      return;
+    }
     
     capabilities.forEach(capability => {
       const item = document.createElement('div');
@@ -479,6 +298,51 @@ document.addEventListener('DOMContentLoaded', function() {
       
       referralsList.appendChild(item);
     });
+  }
+  
+  // Request tools
+  function requestTools() {
+    chrome.runtime.sendMessage({
+      action: 'sendRequest',
+      method: 'tools/list',
+      params: {}
+    });
+  }
+  
+  // Request resources
+  function requestResources() {
+    chrome.runtime.sendMessage({
+      action: 'sendRequest',
+      method: 'resources/list',
+      params: {}
+    });
+  }
+
+  // Handle incoming WebSocket message
+  function handleWebSocketMessage(message) {
+    // Process the message based on content
+    if (message.result) {
+      // Handle initialize response
+      if (message.result.serverInfo) {
+        // We're connected and initialized
+        showConnectedPanel();
+      }
+      
+      // Handle tools/list response
+      if (message.result.tools) {
+        handleToolsResult(message.result.tools);
+      }
+      
+      // Handle resources/list response
+      if (message.result.resources) {
+        handleResourcesResult(message.result.resources);
+      }
+      
+      // Handle tool execution result
+      if (message.result.content) {
+        handleToolExecutionResult(message.result);
+      }
+    }
   }
   
   // Handle tools result
@@ -643,8 +507,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Build parameter inputs based on schema
     generateParamInputs(prefillParams);
     
-    // Add operation change handler to update parameters
-    operationSelect.addEventListener('change', () => generateParamInputs());
+    // Remove old event listener and add new one
+    operationSelect.removeEventListener('change', generateParamInputs);
+    operationSelect.addEventListener('change', generateParamInputs);
     
     // Show tool execution panel
     showToolExecutionPanel();
@@ -738,9 +603,18 @@ document.addEventListener('DOMContentLoaded', function() {
     resultOutput.textContent = 'Executing...';
     
     // Send tool call request
-    sendJsonRpcRequest('tools/call', {
-      name: currentTool.name,
-      arguments: arguments
+    chrome.runtime.sendMessage({
+      action: 'sendRequest',
+      method: 'tools/call',
+      params: {
+        name: currentTool.name,
+        arguments: arguments
+      }
+    }, function(response) {
+      if (!response || !response.success) {
+        resultOutput.textContent = 'Error: Failed to execute tool. Connection may be lost.';
+        showDisconnectedState();
+      }
     });
   }
   
