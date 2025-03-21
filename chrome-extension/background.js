@@ -4,74 +4,98 @@
 let mcpiTabStates = {};
 
 // WebSocket connection state
-let websocketConnection = null;
-let jsonRpcId = 1;
+let websocketInfo = {
+  connection: null,
+  jsonRpcId: 1,
+  lastActivity: null,
+  initialized: false,
+  reconnectAttempts: 0
+};
+
+// Log initialization to confirm the script is running
+console.log("MCPI Client background script initialized");
 
 // Listen for tab updates to detect domain changes
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // Only run when the tab has completed loading
   if (changeInfo.status === 'complete' && tab.url) {
+    console.log(`Tab updated: ${tabId}`, tab.url);
     checkForMcpiSupport(tab.url, tabId);
   }
 });
 
 // Listen for tab activation to update icon if needed
 chrome.tabs.onActivated.addListener((activeInfo) => {
+  console.log(`Tab activated: ${activeInfo.tabId}`);
   updateIconForTab(activeInfo.tabId);
 });
 
-// Listen for messages from popup
+// Improved message handling with proper error checking
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'getMcpiState') {
-    // Get the current tab's MCPI state
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]) {
-        const tabId = tabs[0].tabId || tabs[0].id;
-        const state = mcpiTabStates[tabId] || { supported: false };
-        
-        // Add connection status to the state
-        state.connectionStatus = getConnectionStatus();
-        
-        sendResponse(state);
+  console.log("Received message:", message);
+  
+  try {
+    if (message.action === 'getMcpiState') {
+      // Get the current tab's MCPI state
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs && tabs.length > 0) {
+          const tabId = tabs[0].id;
+          const state = mcpiTabStates[tabId] || { supported: false };
+          
+          // Add connection status to the state
+          state.connectionStatus = getConnectionStatus();
+          
+          console.log("Sending state:", state);
+          sendResponse(state);
+        } else {
+          console.log("No active tab found");
+          sendResponse({ supported: false });
+        }
+      });
+      
+      return true; // Return true to indicate async response
+    }
+    
+    if (message.action === 'connectToMcpi') {
+      // Connect to MCPI server
+      const tabId = message.tabId;
+      const state = mcpiTabStates[tabId];
+      
+      if (state && state.supported && state.websocketUrl) {
+        console.log(`Connecting to ${state.websocketUrl}`);
+        const result = connectToMcpiServer(state.websocketUrl);
+        sendResponse({ success: result });
       } else {
-        sendResponse({ supported: false });
+        console.log("No MCPI support found");
+        sendResponse({ success: false, error: 'No MCPI support found' });
       }
-    });
-    
-    return true; // Return true to indicate async response
-  }
-  
-  if (message.action === 'connectToMcpi') {
-    // Connect to MCPI server
-    const tabId = message.tabId;
-    const state = mcpiTabStates[tabId];
-    
-    if (state && state.supported && state.websocketUrl) {
-      const result = connectToMcpiServer(state.websocketUrl);
-      sendResponse({ success: result });
-    } else {
-      sendResponse({ success: false, error: 'No MCPI support found' });
+      
+      return true;
     }
     
-    return true;
-  }
-  
-  if (message.action === 'getConnectionStatus') {
-    sendResponse(getConnectionStatus());
-    return true;
-  }
-  
-  if (message.action === 'sendRequest') {
-    if (websocketConnection && websocketConnection.socket) {
-      try {
-        const requestId = sendJsonRpcRequest(message.method, message.params);
-        sendResponse({ success: true, requestId });
-      } catch (error) {
-        sendResponse({ success: false, error: error.message });
-      }
-    } else {
-      sendResponse({ success: false, error: 'No active connection' });
+    if (message.action === 'getConnectionStatus') {
+      sendResponse(getConnectionStatus());
+      return true;
     }
+    
+    if (message.action === 'sendRequest') {
+      if (websocketInfo.connection && websocketInfo.connection.readyState === WebSocket.OPEN) {
+        try {
+          const requestId = sendJsonRpcRequest(message.method, message.params);
+          sendResponse({ success: true, requestId });
+        } catch (error) {
+          console.error('Error sending request:', error);
+          sendResponse({ success: false, error: error.message });
+        }
+      } else {
+        console.log("No active connection");
+        sendResponse({ success: false, error: 'No active connection' });
+      }
+      return true;
+    }
+  } catch (error) {
+    console.error("Error handling message:", error);
+    sendResponse({ error: error.message });
     return true;
   }
 });
@@ -140,33 +164,30 @@ function updateIconForTab(tabId) {
 
 // Set icon to active state (green)
 function setIconActive(tabId) {
-  chrome.action.setIcon({
-    tabId: tabId,
-    path: {
-      16: "icons/icon_active.svg",
-      48: "icons/icon_active.svg",
-      128: "icons/icon_active.svg"
-    }
-  });
-  
-  // Update badge to show it's available
-  chrome.action.setBadgeText({ tabId: tabId, text: "MCP" });
-  chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: "#2ecc71" });
+  try {
+    // Use "MCP" as badge text
+    chrome.action.setBadgeText({ tabId: tabId, text: "MCP" });
+    chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: "#2ecc71" }); // Green background
+    
+    // You can use title to provide more context
+    chrome.action.setTitle({ tabId: tabId, title: "MCP Protocol Available" });
+  } catch (error) {
+    console.error("Error setting active state:", error);
+  }
 }
 
-// Set icon to inactive state (gray)
+// Set icon to inactive state (red)
 function setIconInactive(tabId) {
-  chrome.action.setIcon({
-    tabId: tabId,
-    path: {
-      16: "icons/icon_inactive.svg",
-      48: "icons/icon_inactive.svg",
-      128: "icons/icon_inactive.svg"
-    }
-  });
-  
-  // Clear badge
-  chrome.action.setBadgeText({ tabId: tabId, text: "" });
+  try {
+    // Keep the same text but change color to indicate unavailability
+    chrome.action.setBadgeText({ tabId: tabId, text: "MCP" });
+    chrome.action.setBadgeBackgroundColor({ tabId: tabId, color: "#e74c3c" }); // Red background
+    
+    // Update title
+    chrome.action.setTitle({ tabId: tabId, title: "MCP Protocol Not Available" });
+  } catch (error) {
+    console.error("Error setting inactive state:", error);
+  }
 }
 
 // Query for MCP TXT record using DNS-over-HTTPS
@@ -266,20 +287,18 @@ async function fetchServerDetails(discoveryUrl) {
 
 // Get current connection status
 function getConnectionStatus() {
-  if (!websocketConnection) {
+  const connection = websocketInfo.connection;
+  
+  if (!connection) {
     return { connected: false };
   }
   
-  if (websocketConnection.socket) {
-    return {
-      connected: websocketConnection.socket.readyState === WebSocket.OPEN,
-      readyState: websocketConnection.socket.readyState,
-      initialized: websocketConnection.initialized,
-      lastActivity: websocketConnection.lastActivity
-    };
-  }
-  
-  return { connected: false };
+  return {
+    connected: connection.readyState === WebSocket.OPEN,
+    readyState: connection.readyState,
+    initialized: websocketInfo.initialized,
+    lastActivity: websocketInfo.lastActivity
+  };
 }
 
 // Connect to MCPI server
@@ -290,7 +309,7 @@ function connectToMcpiServer(websocketUrl) {
   }
   
   // Clean up any existing connection before creating a new one
-  if (websocketConnection && websocketConnection.socket) {
+  if (websocketInfo.connection) {
     cleanupWebSocketResources();
   }
 
@@ -306,12 +325,13 @@ function connectToMcpiServer(websocketUrl) {
       }
     }, 10000); // 10 seconds connection timeout
     
-    websocketConnection = {
-      socket: socket,
+    websocketInfo = {
+      connection: socket,
       initialized: false,
       connectionTimeout: connectionTimeout,
       reconnectAttempts: 0,
-      lastActivity: Date.now()
+      lastActivity: Date.now(),
+      jsonRpcId: 1
     };
 
     // WebSocket event handlers
@@ -319,8 +339,8 @@ function connectToMcpiServer(websocketUrl) {
       console.log('WebSocket connection established');
       
       // Clear connection timeout
-      if (websocketConnection.connectionTimeout) {
-        clearTimeout(websocketConnection.connectionTimeout);
+      if (websocketInfo.connectionTimeout) {
+        clearTimeout(websocketInfo.connectionTimeout);
       }
       
       // Send initialize request
@@ -336,13 +356,13 @@ function connectToMcpiServer(websocketUrl) {
       });
       
       // Set up ping interval to keep connection alive
-      websocketConnection.pingInterval = setInterval(function() {
+      websocketInfo.pingInterval = setInterval(function() {
         // Only send ping if socket is still open
         if (socket.readyState === WebSocket.OPEN) {
           console.log('Sending keepalive ping...');
           sendJsonRpcRequest('ping');
         } else {
-          clearInterval(websocketConnection.pingInterval);
+          clearInterval(websocketInfo.pingInterval);
         }
       }, 30000); // Send ping every 30 seconds
       
@@ -354,20 +374,18 @@ function connectToMcpiServer(websocketUrl) {
     
     socket.onmessage = function(event) {
       // Reset inactivity timer on any message received
-      websocketConnection.lastActivity = Date.now();
+      websocketInfo.lastActivity = Date.now();
       
-      if (websocketConnection.inactivityTimeout) {
-        clearTimeout(websocketConnection.inactivityTimeout);
+      if (websocketInfo.inactivityTimeout) {
+        clearTimeout(websocketInfo.inactivityTimeout);
       }
       
       // Set new inactivity timeout
-      websocketConnection.inactivityTimeout = setTimeout(function() {
+      websocketInfo.inactivityTimeout = setTimeout(function() {
         console.log('Connection inactive for too long, reconnecting...');
         if (socket.readyState === WebSocket.OPEN) {
           socket.close();
         }
-        
-        // No need to auto-reconnect here, as the popup will reconnect when opened
       }, 120000); // 2 minutes of inactivity
       
       handleWebSocketMessage(event.data);
@@ -394,40 +412,43 @@ function connectToMcpiServer(websocketUrl) {
 
 // Clean up WebSocket resources
 function cleanupWebSocketResources() {
-  if (!websocketConnection) return;
+  if (!websocketInfo.connection) return;
   
   // Clear all timers
-  if (websocketConnection.connectionTimeout) {
-    clearTimeout(websocketConnection.connectionTimeout);
+  if (websocketInfo.connectionTimeout) {
+    clearTimeout(websocketInfo.connectionTimeout);
   }
   
-  if (websocketConnection.pingInterval) {
-    clearInterval(websocketConnection.pingInterval);
+  if (websocketInfo.pingInterval) {
+    clearInterval(websocketInfo.pingInterval);
   }
   
-  if (websocketConnection.inactivityTimeout) {
-    clearTimeout(websocketConnection.inactivityTimeout);
+  if (websocketInfo.inactivityTimeout) {
+    clearTimeout(websocketInfo.inactivityTimeout);
   }
   
   // Close socket if it's open
-  if (websocketConnection.socket && 
-      websocketConnection.socket.readyState !== WebSocket.CLOSED &&
-      websocketConnection.socket.readyState !== WebSocket.CLOSING) {
+  const socket = websocketInfo.connection;
+  if (socket && 
+      socket.readyState !== WebSocket.CLOSED &&
+      socket.readyState !== WebSocket.CLOSING) {
     try {
-      websocketConnection.socket.close();
+      socket.close();
     } catch (e) {
       console.error('Error closing WebSocket:', e);
     }
   }
   
-  // Clear socket reference
-  websocketConnection = null;
+  // Reset connection state
+  websocketInfo.connection = null;
+  websocketInfo.initialized = false;
 }
 
 // Handle incoming WebSocket message
 function handleWebSocketMessage(data) {
   try {
     const message = JSON.parse(data);
+    console.log("Received WebSocket message:", message);
     
     // Check for error response
     if (message.error) {
@@ -438,8 +459,8 @@ function handleWebSocketMessage(data) {
     // Handle successful responses
     if (message.result) {
       // Handle initialize response
-      if (message.result.serverInfo && websocketConnection) {
-        websocketConnection.initialized = true;
+      if (message.result.serverInfo) {
+        websocketInfo.initialized = true;
         broadcastConnectionStatusChange();
       }
     }
@@ -448,6 +469,11 @@ function handleWebSocketMessage(data) {
     chrome.runtime.sendMessage({
       action: 'websocketMessage',
       data: message
+    }).catch(error => {
+      // Only log if it's not the expected "receiving end" error
+      if (!error.message.includes("receiving end does not exist")) {
+        console.error("Error broadcasting message:", error);
+      }
     });
   } catch (error) {
     console.error('Error parsing WebSocket message:', error);
@@ -456,18 +482,18 @@ function handleWebSocketMessage(data) {
 
 // Send JSON-RPC request
 function sendJsonRpcRequest(method, params = null) {
-  if (!websocketConnection || !websocketConnection.socket) {
+  if (!websocketInfo.connection) {
     console.error('No active WebSocket connection');
     return null;
   }
   
   // Only proceed if connection is open
-  if (websocketConnection.socket.readyState !== WebSocket.OPEN) {
-    console.error('WebSocket connection not open (state:', websocketConnection.socket.readyState, ')');
+  if (websocketInfo.connection.readyState !== WebSocket.OPEN) {
+    console.error('WebSocket connection not open (state:', websocketInfo.connection.readyState, ')');
     return null;
   }
   
-  const requestId = jsonRpcId++;
+  const requestId = websocketInfo.jsonRpcId++;
   
   const request = {
     jsonrpc: '2.0',
@@ -480,8 +506,10 @@ function sendJsonRpcRequest(method, params = null) {
   }
   
   try {
-    websocketConnection.socket.send(JSON.stringify(request));
-    websocketConnection.lastActivity = Date.now();
+    const requestStr = JSON.stringify(request);
+    console.log(`Sending request: ${requestStr}`);
+    websocketInfo.connection.send(requestStr);
+    websocketInfo.lastActivity = Date.now();
     return requestId;
   } catch (error) {
     console.error('Error sending WebSocket message:', error);
@@ -494,5 +522,12 @@ function broadcastConnectionStatusChange() {
   chrome.runtime.sendMessage({
     action: 'connectionStatusChanged',
     status: getConnectionStatus()
+  }).catch(error => {
+    // Only log if it's not the expected "receiving end" error
+    if (!error.message.includes("receiving end does not exist")) {
+      console.error("Error broadcasting status change:", error);
+    }
   });
 }
+
+console.log("MCPI Client background script loaded successfully");
