@@ -1,6 +1,6 @@
 # MCPI: Model Context Protocol Integration
 
-MCPI (Model Context Protocol Integration) is an implementation of the Model Context Protocol (MCP) for AI-web connectivity. It enables AI agents to discover, verify, and transact with web services through a standardized protocol, now featuring a flexible plugin architecture.
+MCPI (Model Context Protocol Integration) is an implementation of the Model Context Protocol (MCP) for AI-web connectivity. It enables AI agents to discover, verify, and transact with web services through a standardized protocol, now featuring a flexible plugin architecture and Hello Protocol extension.
 
 **Official Website**
 [https://mcpintegrate.com](https://mcpintegrate.com)
@@ -18,6 +18,24 @@ MCPI extends the Model Context Protocol to create a bridge between AI agents and
 - Generic operation handlers (SEARCH, GET, LIST)
 - Referral relationships between services
 - Chrome extension for automatic MCPI detection and interaction
+- Hello Protocol for efficient AI-website introduction
+
+## Hello Protocol Extension
+
+The Hello Protocol is a key extension that enables AI agents to efficiently understand websites without having to process entire sites:
+
+- **Efficient Introduction**: Server-side AI introduces itself with key information about the website
+- **Contextualized Responses**: Websites can customize their introduction based on the visitor's context
+- **Capability Advertising**: Immediately informs AI agents about available tools and capabilities
+- **SEO for AI**: Enables websites to optimize for AI agent discovery with customizable introduction content
+
+With Hello Protocol, AI agents can quickly learn about:
+- Who the website represents
+- What products or services they offer
+- Key capabilities available through the API
+- Primary topics and expertise areas
+
+See the [Hello Protocol Documentation](https://mcpintegrate.com/hello-protocol) for implementation details.
 
 ## Plugin Architecture
 
@@ -224,6 +242,29 @@ Main configuration file defining provider info, capabilities, and referrals:
 
 Each capability references a data file that contains its data. These files should be placed in the `data/mock` directory.
 
+### 3. `hello_config.json` (Optional for Hello Protocol)
+
+Configuration for the Hello Protocol extension that provides AI agent introductions:
+
+```json
+{
+  "default": {
+    "introduction": "Hello! I'm the AI assistant for Example Store, an online retailer of eco-friendly products. How can I assist you today?",
+    "metadata": {
+      "primary_focus": ["sustainability", "eco-friendly", "zero-waste"],
+      "key_offerings": ["bamboo products", "recycled goods", "sustainable alternatives"],
+      "unique_selling_points": ["carbon-neutral shipping", "plastic-free packaging"]
+    }
+  },
+  "contexts": {
+    "shopping": {
+      "introduction": "Welcome to Example Store! We offer a wide range of eco-friendly products with free shipping on orders over $50.",
+      "highlight_capabilities": ["product_search", "order_history"]
+    }
+  }
+}
+```
+
 ## DNS-Based Discovery
 
 MCPI supports DNS-based discovery that allows clients to find MCPI servers using DNS TXT records:
@@ -251,11 +292,6 @@ Test your DNS TXT record using the `dig` command:
 dig +short TXT _mcp.example.com
 ```
 
-Alternatively, you can use Google's DNS resolver to test your setup via a web request:
-
-- **URL**: [Google DNS Resolver](https://dns.google/resolve?name=_mcp.mcpintegrate.com&type=TXT)
-- **Description**: This tool allows you to query DNS records directly through Google's public DNS service. Replace `_mcp.mcpintegrate.com` with your domain to verify the TXT record configuration.
-
 ## MCP Protocol Implementation
 
 This implementation follows the Model Context Protocol (MCP) specification:
@@ -277,12 +313,6 @@ To create a new plugin:
 2. Implement the McpPlugin trait
 3. Register your plugin in the server's main function
 
-Plugins can be of different types:
-
-1. **Data-driven plugins**: Extend the JsonDataPlugin base class
-2. **Dynamic plugins**: Implement the McpPlugin trait directly
-3. **API wrapper plugins**: Connect to external services
-
 ## Standard Plugin Operations
 
 While plugins can define custom operations, these standard operations are recommended:
@@ -293,6 +323,7 @@ While plugins can define custom operations, these standard operations are recomm
 - **CREATE**: Create a new item (for writable plugins)
 - **UPDATE**: Update an existing item (for writable plugins)
 - **DELETE**: Remove an item (for writable plugins)
+- **HELLO**: Introduce the website/service to an AI agent (new)
 
 ## Architecture
 
