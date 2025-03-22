@@ -87,8 +87,20 @@ document.addEventListener('DOMContentLoaded', function() {
         if (mcpiState.connectionStatus && mcpiState.connectionStatus.connected && mcpiState.connectionStatus.initialized) {
           // Already connected - get data and show connected UI
           updateServerInfo();
-          requestTools();
-          requestResources();
+          // Use discoveredTools from response if available
+          if (mcpiState.discoveredTools && mcpiState.discoveredTools.length > 0) {
+            handleToolsResult(mcpiState.discoveredTools);
+          } else {
+            requestTools();
+          }
+          
+          // Use discoveredResources from response if available
+          if (mcpiState.discoveredResources && mcpiState.discoveredResources.length > 0) {
+            handleResourcesResult(mcpiState.discoveredResources);
+          } else {
+            requestResources();
+          }
+          
           showConnectedPanel();
         } else {
           // Not connected or not initialized yet
@@ -351,45 +363,63 @@ document.addEventListener('DOMContentLoaded', function() {
     
     toolsList.innerHTML = '';
     
-    // Add example quick actions for product_search, customer_lookup, etc.
-    const quickActionTools = {
-      'product_search': [
-        { operation: 'SEARCH', label: 'Search for "bamboo" products', params: { query: 'bamboo' } },
-        { operation: 'GET', label: 'Get Bamboo Water Bottle details', params: { id: 'eco-1001' } },
-        { operation: 'LIST', label: 'List all products', params: {} }
-      ],
-      'customer_lookup': [
-        { operation: 'GET', label: 'Look up customer Jane Smith', params: { id: 'cust-1001' } },
-        { operation: 'LIST', label: 'List all customers', params: {} }
-      ],
-      'order_history': [
-        { operation: 'GET', label: 'View order details', params: { id: 'order-5001' } },
-        { operation: 'SEARCH', label: 'Find Jane\'s orders', params: { field: 'customer_id', query: 'cust-1001' } }
-      ],
-      'product_reviews': [
-        { operation: 'SEARCH', label: 'Read reviews for Bamboo Bottle', params: { field: 'product_id', query: 'eco-1001' } }
-      ],
-      'website_content': [
-        { operation: 'GET', label: 'View About page', params: { id: 'about' } },
-        { operation: 'SEARCH', label: 'Find sustainability content', params: { query: 'sustainability' } }
-      ],
-      'weather_forecast': [
-        { operation: 'GET', label: 'Get London weather', params: { location: 'London' } }
-      ]
+    // Create quick actions based on tool schema
+    const createQuickActionsForTool = (tool) => {
+      const quickActions = [];
+      
+      // Get supported operations from the tool's schema
+      const operations = extractOperationsFromSchema(tool.inputSchema);
+      
+      // Create relevant quick actions based on the operation naming patterns
+      operations.forEach(operation => {
+        if (operation === "HELLO") {
+          quickActions.push({ 
+            operation: "HELLO", 
+            label: "Get site introduction", 
+            params: { context: "general" } 
+          });
+        }
+        else if (operation.includes("SEARCH") || operation === "SEARCH") {
+          quickActions.push({ 
+            operation, 
+            label: `Search ${operation.replace("SEARCH_", "").toLowerCase()}`, 
+            params: { query: "example" } 
+          });
+        }
+        else if (operation.includes("LIST") || operation === "LIST") {
+          quickActions.push({ 
+            operation, 
+            label: `List all ${operation.replace("LIST_", "").toLowerCase()}`, 
+            params: {} 
+          });
+        }
+        
+        // Add more specific quick actions based on full operation name patterns
+        if (operation === "GET_PRODUCT" || operation === "GET" && tool.name === "store") {
+          quickActions.push({ 
+            operation, 
+            label: "View product details", 
+            params: { id: "eco-1001" } 
+          });
+        }
+        else if (operation === "GET" && tool.name === "website") {
+          quickActions.push({ 
+            operation, 
+            label: "View About page", 
+            params: { id: "about" } 
+          });
+        }
+      });
+      
+      return quickActions;
     };
     
     tools.forEach(tool => {
       const item = document.createElement('div');
       item.className = 'list-item tool-item';
       
-      // Extract operations from input schema if available
-      let operations = [];
-      if (tool.inputSchema && 
-          tool.inputSchema.properties && 
-          tool.inputSchema.properties.operation && 
-          tool.inputSchema.properties.operation.enum) {
-        operations = tool.inputSchema.properties.operation.enum;
-      }
+      // Extract operations from input schema
+      const operations = extractOperationsFromSchema(tool.inputSchema);
       
       let toolHtml = `
         <h3>${tool.name}</h3>
@@ -399,10 +429,11 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>`;
       
       // Add quick action buttons if available for this tool
-      if (quickActionTools[tool.name]) {
+      const quickActions = createQuickActionsForTool(tool);
+      if (quickActions.length > 0) {
         toolHtml += '<div class="quick-actions">';
         
-        quickActionTools[tool.name].forEach(action => {
+        quickActions.forEach(action => {
           toolHtml += `<button class="quick-action-btn" 
             data-tool="${tool.name}" 
             data-operation="${action.operation}" 
@@ -441,6 +472,15 @@ document.addEventListener('DOMContentLoaded', function() {
       
       toolsList.appendChild(item);
     });
+  }
+  
+  // Extract operations from a tool's input schema
+  function extractOperationsFromSchema(schema) {
+    // Default operations if none found
+    if (!schema) return ["SEARCH", "GET", "LIST"];
+    
+    // Try to extract from schema
+    return schema.properties?.operation?.enum || ["SEARCH", "GET", "LIST"];
   }
   
   // Execute a quick action
@@ -488,21 +528,19 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set available operations
     operationSelect.innerHTML = '';
-    if (tool.inputSchema && 
-        tool.inputSchema.properties && 
-        tool.inputSchema.properties.operation && 
-        tool.inputSchema.properties.operation.enum) {
-      
-      tool.inputSchema.properties.operation.enum.forEach(op => {
-        const option = document.createElement('option');
-        option.value = op;
-        option.textContent = op;
-        if (preselectedOperation && op === preselectedOperation) {
-          option.selected = true;
-        }
-        operationSelect.appendChild(option);
-      });
-    }
+    
+    // Extract operations from schema
+    const operations = extractOperationsFromSchema(tool.inputSchema);
+    
+    operations.forEach(op => {
+      const option = document.createElement('option');
+      option.value = op;
+      option.textContent = op;
+      if (preselectedOperation && op === preselectedOperation) {
+        option.selected = true;
+      }
+      operationSelect.appendChild(option);
+    });
     
     // Build parameter inputs based on schema
     generateParamInputs(prefillParams);
@@ -549,20 +587,7 @@ document.addEventListener('DOMContentLoaded', function() {
       input.name = key;
       
       // Add placeholder based on parameter type and operation
-      switch (operation) {
-        case 'GET':
-          if (key === 'id') {
-            input.placeholder = 'Enter ID (e.g., eco-1001)';
-          }
-          break;
-        case 'SEARCH':
-          if (key === 'query') {
-            input.placeholder = 'Enter search query';
-          } else if (key === 'field') {
-            input.placeholder = 'Field to search in (e.g., name)';
-          }
-          break;
-      }
+      input.placeholder = getPlaceholderForParam(key, operation, currentTool.name);
       
       // Set value from prefill params if available
       if (prefillParams && prefillParams[key] !== undefined) {
@@ -574,6 +599,38 @@ document.addEventListener('DOMContentLoaded', function() {
       paramGroup.appendChild(input);
       paramsContainer.appendChild(paramGroup);
     }
+  }
+  
+  // Get placeholder text for parameter input based on context
+  function getPlaceholderForParam(paramName, operation, toolName) {
+    // General placeholders based on parameter name
+    if (paramName === 'id') {
+      if (toolName === 'store' && operation.includes('PRODUCT')) 
+        return 'Enter product ID (e.g., eco-1001)';
+      else if (toolName === 'website')
+        return 'Enter content ID (e.g., about)';
+      else
+        return 'Enter ID';
+    }
+    
+    if (paramName === 'query') {
+      return 'Enter search query';
+    }
+    
+    if (paramName === 'field') {
+      return 'Field to search in (e.g., name)';
+    }
+    
+    if (paramName === 'context' && operation === 'HELLO') {
+      return 'Context like "shopping" or "support"';
+    }
+    
+    if (paramName === 'detail_level' && operation === 'HELLO') {
+      return 'basic, standard, or detailed';
+    }
+    
+    // Default placeholder
+    return `Enter ${paramName}`;
   }
   
   // Execute current tool

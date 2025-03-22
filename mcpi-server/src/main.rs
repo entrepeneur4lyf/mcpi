@@ -8,7 +8,7 @@ use futures::{sink::SinkExt, stream::StreamExt};
 use axum::extract::ws::{Message, WebSocket};
 use mcpi_common::{
     CapabilityDescription, DiscoveryResponse, 
-    MCPRequest, Resource, Tool, MCPI_VERSION, PluginFactory
+    MCPRequest, Resource, Tool, MCPI_VERSION
 };
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -24,7 +24,7 @@ mod plugin_registry;
 mod plugins;
 
 use plugin_registry::PluginRegistry;
-use plugins::WeatherPlugin;
+use plugins::{WeatherPlugin, HelloPlugin, StorePlugin, WebsitePlugin, SocialPlugin};
 
 // Define paths as constants
 const CONFIG_FILE_PATH: &str = "data/config.json";
@@ -60,74 +60,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let provider_info = config.get("provider").cloned().unwrap_or_else(|| json!({}));
     let referrals = config.get("referrals").cloned().unwrap_or_else(|| json!([]));
     
-    // Register all plugins from configuration capabilities
-    if let Some(caps_obj) = config.get("capabilities").and_then(|c| c.as_object()) {
-        for (cap_name, cap_config) in caps_obj {
-            let name = cap_config.get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or(cap_name)
-                .to_string();
-            
-            let description = cap_config.get("description")
-                .and_then(|d| d.as_str())
-                .unwrap_or("No description available")
-                .to_string();
-            
-            let category = cap_config.get("category")
-                .and_then(|c| c.as_str())
-                .unwrap_or("misc")
-                .to_string();
-            
-            let operations = cap_config.get("operations")
-                .and_then(|o| o.as_array())
-                .map(|ops_array| {
-                    ops_array.iter()
-                        .filter_map(|op| op.as_str().map(|s| s.to_string()))
-                        .collect::<Vec<String>>()
-                })
-                .unwrap_or_else(|| vec!["SEARCH".to_string(), "GET".to_string(), "LIST".to_string()]);
-            
-            let data_file = cap_config.get("data_file")
-                .and_then(|f| f.as_str())
-                .unwrap_or(&format!("{}.json", name))
-                .to_string();
-            
-            // Validate data file exists
-            let full_data_path = Path::new(DATA_PATH).join(&data_file);
-            if !full_data_path.exists() {
-                tracing::error!("Data file not found for capability '{}': {}", 
-                    name, full_data_path.display());
-                return Err(format!("Data file not found: {}", full_data_path.display()).into());
-            }
-            
-            // Create plugin using factory
-            let plugin = PluginFactory::create_plugin_from_config(
-                &name,
-                &description,
-                &category,
-                operations,
-                &data_file,
-                DATA_PATH,
-            );
-            
-            if let Err(e) = registry.register_plugin(plugin) {
-                tracing::error!("Failed to register plugin '{}': {}", name, e);
-                return Err(e.into());
-            }
-            
-            tracing::info!("Registered plugin: {}", name);
-        }
-    } else {
-        tracing::warn!("No capabilities found in configuration");
+    // Register core plugins
+    let hello_plugin = Arc::new(HelloPlugin::new(DATA_PATH));
+    if let Err(e) = registry.register_plugin(hello_plugin) {
+        tracing::error!("Failed to register hello plugin: {}", e);
+        return Err(e.into());
     }
-    
-    // Register weather plugin (special case with dynamic data)
+    tracing::info!("Registered core plugin: hello");
+
+    let website_plugin = Arc::new(WebsitePlugin::new(DATA_PATH));
+    if let Err(e) = registry.register_plugin(website_plugin) {
+        tracing::error!("Failed to register website plugin: {}", e);
+        return Err(e.into());
+    }
+    tracing::info!("Registered core plugin: website");
+
+    let store_plugin = Arc::new(StorePlugin::new(DATA_PATH));
+    if let Err(e) = registry.register_plugin(store_plugin) {
+        tracing::error!("Failed to register store plugin: {}", e);
+        return Err(e.into());
+    }
+    tracing::info!("Registered core plugin: store");
+
+    let social_plugin = Arc::new(SocialPlugin::new(referrals.clone()));
+    if let Err(e) = registry.register_plugin(social_plugin) {
+        tracing::error!("Failed to register social plugin: {}", e);
+        return Err(e.into());
+    }
+    tracing::info!("Registered core plugin: social");
+
+    // Register extension plugins
     let weather_plugin = Arc::new(WeatherPlugin::new());
     if let Err(e) = registry.register_plugin(weather_plugin) {
         tracing::error!("Failed to register weather plugin: {}", e);
         return Err(e.into());
     }
-    tracing::info!("Registered plugin: weather_forecast");
+    tracing::info!("Registered extension plugin: weather_forecast");
 
     // Create shared application state
     let app_state = Arc::new(AppState { 

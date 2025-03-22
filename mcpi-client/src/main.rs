@@ -229,6 +229,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|_| "WebSocket send error")?;
     
     let mut tools = Vec::new();
+    let mut tools_info = Vec::new();
+    
     if let Some(Ok(Message::Text(response))) = read.next().await {
         let parsed: MCPResponse = serde_json::from_str(&response)?;
         if let Some(result) = parsed.result {
@@ -237,6 +239,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 for tool in tools_array {
                     let tool_name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("Unnamed").to_string();
                     tools.push(tool_name.clone());
+                    tools_info.push(tool.clone());
                     
                     println!("  - {}", tool_name);
                     if let Some(description) = tool.get("description").and_then(|d| d.as_str()) {
@@ -281,137 +284,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
     for tool_name in tools_to_test {
         println!("\n=== Testing tool: {} ===", tool_name);
         
-        match tool_name.as_str() {
-            "product_search" => {
-                // Test SEARCH operation for products
-                println!("\nCalling product_search tool with SEARCH operation...");
-                let call_tool_request = MCPRequest {
-                    jsonrpc: "2.0".to_string(),
-                    id: json!(5),
-                    method: "tools/call".to_string(),
-                    params: Some(json!({
-                        "name": "product_search",
-                        "arguments": {
-                            "operation": "SEARCH",
-                            "query": "bamboo"
-                        }
-                    })),
-                };
-                
-                write.send(Message::Text(serde_json::to_string(&call_tool_request)?)).await
-                    .map_err(|_| "WebSocket send error")?;
-                
-                if let Some(Ok(Message::Text(response))) = read.next().await {
-                    let parsed: MCPResponse = serde_json::from_str(&response)?;
-                    if let Some(result) = parsed.result {
-                        let tool_result: ToolCallResult = serde_json::from_value(result)?;
-                        
-                        println!("\nTool call result{}:", if tool_result.is_error { " (ERROR)" } else { "" });
-                        for content in tool_result.content {
-                            if content.content_type == "text" {
-                                if let Some(text) = content.text {
-                                    if tool_result.is_error {
-                                        println!("  Error: {}", text);
-                                    } else {
-                                        // Parse the result as JSON for better display
-                                        if let Ok(json_result) = serde_json::from_str::<Value>(&text) {
-                                            if let Some(results) = json_result.get("results").and_then(|r| r.as_array()) {
-                                                println!("  Found {} products matching 'bamboo':", results.len());
-                                                for product in results {
-                                                    println!("  - {} ({})", 
-                                                        product.get("name").and_then(|n| n.as_str()).unwrap_or("Unnamed"),
-                                                        product.get("id").and_then(|i| i.as_str()).unwrap_or("")
-                                                    );
-                                                    println!("    Price: ${}", product.get("price").and_then(|p| p.as_f64()).unwrap_or(0.0));
-                                                    println!("    Description: {}", product.get("description").and_then(|d| d.as_str()).unwrap_or(""));
-                                                }
-                                            } else {
-                                                println!("  {}", text);
-                                            }
-                                        } else {
-                                            println!("  {}", text);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Test GET operation for products
-                call_tool(&mut write, &mut read, "product_search", "GET", 
-                    json!({"id": "eco-1001"})).await?; // Bamboo Water Bottle
-                
-                // Test LIST operation for products
-                call_tool(&mut write, &mut read, "product_search", "LIST", 
-                    json!({})).await?;
-            },
+        // Get this tool's input schema to determine supported operations
+        let tool_schema = tools_info.iter()
+            .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(&tool_name))
+            .and_then(|t| t.get("inputSchema").cloned())
+            .unwrap_or_else(|| json!({}));
+        
+        // Extract supported operations from schema
+        let operations = tool_schema
+            .get("properties")
+            .and_then(|p| p.get("operation"))
+            .and_then(|o| o.get("enum"))
+            .and_then(|e| e.as_array())
+            .map(|ops| {
+                ops.iter()
+                    .filter_map(|op| op.as_str().map(String::from))
+                    .collect::<Vec<String>>()
+            })
+            .unwrap_or_else(|| vec!["SEARCH".to_string()]);
+        
+        println!("Supported operations: {:?}", operations);
+        
+        // Test each supported operation
+        for operation in operations {
+            // Create appropriate arguments based on operation
+            let arguments = match operation.as_str() {
+                op if op.contains("SEARCH") || op == "SEARCH" => {
+                    json!({"query": "example"})
+                },
+                op if op.contains("GET") || op == "GET" => {
+                    // Pick first ID from tool name to generate a plausible ID
+                    let id_prefix = match tool_name.as_str() {
+                        "store" => "eco-1001",
+                        "website" => "about",
+                        "hello" => "",  // No ID needed for HELLO operation
+                        "social" => "ecoshipping.com", // A domain for referral
+                        _ => "sample-id"
+                    };
+                    json!({"id": id_prefix})
+                },
+                "HELLO" => {
+                    json!({"context": "shopping", "detail_level": "standard"})
+                },
+                "LIST_PRODUCTS" | "LIST_CUSTOMERS" | "LIST_ORDERS" | "LIST_REVIEWS" | "LIST_REFERRALS" | "LIST" => {
+                    json!({})
+                },
+                _ => json!({})
+            };
             
-            "customer_lookup" => {
-                // Test GET operation for customer
-                call_tool(&mut write, &mut read, "customer_lookup", "GET", 
-                    json!({"id": "cust-1001"})).await?;
-                
-                // Test LIST operation for customers
-                call_tool(&mut write, &mut read, "customer_lookup", "LIST", 
-                    json!({})).await?;
-            },
-            
-            "order_history" => {
-                // Test GET operation for orders
-                call_tool(&mut write, &mut read, "order_history", "GET", 
-                    json!({"id": "order-5001"})).await?;
-                
-                // Test SEARCH operation for orders by customer
-                call_tool(&mut write, &mut read, "order_history", "SEARCH", 
-                    json!({"field": "customer_id", "query": "cust-1001"})).await?;
-                
-                // Test LIST operation for orders
-                call_tool(&mut write, &mut read, "order_history", "LIST", 
-                    json!({})).await?;
-            },
-            
-            "product_reviews" => {
-                // Test GET operation for reviews
-                call_tool(&mut write, &mut read, "product_reviews", "GET", 
-                    json!({"id": "rev-2001"})).await?;
-                
-                // Test SEARCH operation for reviews by product
-                call_tool(&mut write, &mut read, "product_reviews", "SEARCH", 
-                    json!({"field": "product_id", "query": "eco-1001"})).await?;
-                
-                // Test LIST operation for reviews
-                call_tool(&mut write, &mut read, "product_reviews", "LIST", 
-                    json!({})).await?;
-            },
-            
-            "website_content" => {
-                // Test GET operation for about page
-                call_tool(&mut write, &mut read, "website_content", "GET", 
-                    json!({"id": "about"})).await?;
-                
-                // Test LIST operation for news content
-                call_tool(&mut write, &mut read, "website_content", "LIST", 
-                    json!({"type": "news", "sort_by": "date", "order": "desc"})).await?;
-                
-                // Test SEARCH operation across all content
-                call_tool(&mut write, &mut read, "website_content", "SEARCH", 
-                    json!({"query": "sustainability"})).await?;
-            },
-            
-            "weather_forecast" => {
-                // Test GET operation for weather
-                call_tool(&mut write, &mut read, "weather_forecast", "GET", 
-                    json!({"location": "London"})).await?;
-                
-                // Test LIST operation for weather
-                call_tool(&mut write, &mut read, "weather_forecast", "LIST", 
-                    json!({})).await?;
-            },
-            
-            _ => {
-                println!("Skipping unknown tool: {}", tool_name);
-            }
+            // Call the tool with the appropriate operation and arguments
+            call_tool(&mut write, &mut read, &tool_name, &operation, arguments).await?;
         }
     }
     
@@ -487,6 +409,8 @@ where
         })),
     };
     
+    println!("Request: {}", serde_json::to_string_pretty(&request.params).unwrap_or_default());
+    
     write.send(Message::Text(serde_json::to_string(&request)?)).await
         .map_err(|_| "WebSocket send error")?;
     
@@ -504,19 +428,7 @@ where
                         } else {
                             // Try to parse as JSON for better display
                             if let Ok(json_result) = serde_json::from_str::<Value>(&text) {
-                                if let Some(results) = json_result.get("results").and_then(|r| r.as_array()) {
-                                    println!("  Found {} results", results.len());
-                                    let sample_size = std::cmp::min(results.len(), 2);
-                                    for i in 0..sample_size {
-                                        println!("  Sample result {}: {}", i+1, 
-                                            serde_json::to_string_pretty(&results[i]).unwrap_or_default());
-                                    }
-                                    if results.len() > sample_size {
-                                        println!("  ... and {} more results", results.len() - sample_size);
-                                    }
-                                } else {
-                                    println!("  {}", serde_json::to_string_pretty(&json_result).unwrap_or_default());
-                                }
+                                println!("  {}", serde_json::to_string_pretty(&json_result).unwrap_or_default());
                             } else {
                                 println!("  {}", text);
                             }

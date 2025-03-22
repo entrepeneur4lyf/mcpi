@@ -9,7 +9,9 @@ let websocketInfo = {
   jsonRpcId: 1,
   lastActivity: null,
   initialized: false,
-  reconnectAttempts: 0
+  reconnectAttempts: 0,
+  discoveredTools: [], // Store discovered tools from server
+  discoveredResources: [] // Store discovered resources
 };
 
 // Log initialization to confirm the script is running
@@ -45,6 +47,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Add connection status to the state
           state.connectionStatus = getConnectionStatus();
           
+          // Add discovered tools and resources
+          state.discoveredTools = websocketInfo.discoveredTools;
+          state.discoveredResources = websocketInfo.discoveredResources;
+          
           console.log("Sending state:", state);
           sendResponse(state);
         } else {
@@ -75,6 +81,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     if (message.action === 'getConnectionStatus') {
       sendResponse(getConnectionStatus());
+      return true;
+    }
+    
+    if (message.action === 'getDiscoveredTools') {
+      sendResponse({ tools: websocketInfo.discoveredTools });
+      return true;
+    }
+    
+    if (message.action === 'getDiscoveredResources') {
+      sendResponse({ resources: websocketInfo.discoveredResources });
       return true;
     }
     
@@ -331,7 +347,9 @@ function connectToMcpiServer(websocketUrl) {
       connectionTimeout: connectionTimeout,
       reconnectAttempts: 0,
       lastActivity: Date.now(),
-      jsonRpcId: 1
+      jsonRpcId: 1,
+      discoveredTools: [],
+      discoveredResources: []
     };
 
     // WebSocket event handlers
@@ -365,6 +383,17 @@ function connectToMcpiServer(websocketUrl) {
           clearInterval(websocketInfo.pingInterval);
         }
       }, 30000); // Send ping every 30 seconds
+      
+      // Request list of tools after connection
+      setTimeout(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          // Get list of available tools
+          sendJsonRpcRequest('tools/list');
+          
+          // Get list of available resources
+          sendJsonRpcRequest('resources/list');
+        }
+      }, 500); // Small delay to ensure initialize completes
       
       // Broadcast connection status change
       broadcastConnectionStatusChange();
@@ -439,9 +468,15 @@ function cleanupWebSocketResources() {
     }
   }
   
+  // Keep discovered tools and resources
+  const discoveredTools = websocketInfo.discoveredTools;
+  const discoveredResources = websocketInfo.discoveredResources;
+  
   // Reset connection state
   websocketInfo.connection = null;
   websocketInfo.initialized = false;
+  websocketInfo.discoveredTools = discoveredTools;
+  websocketInfo.discoveredResources = discoveredResources;
 }
 
 // Handle incoming WebSocket message
@@ -462,6 +497,18 @@ function handleWebSocketMessage(data) {
       if (message.result.serverInfo) {
         websocketInfo.initialized = true;
         broadcastConnectionStatusChange();
+      }
+      
+      // Handle tools/list response
+      if (message.result.tools) {
+        websocketInfo.discoveredTools = message.result.tools;
+        console.log('Discovered tools:', websocketInfo.discoveredTools);
+      }
+      
+      // Handle resources/list response
+      if (message.result.resources) {
+        websocketInfo.discoveredResources = message.result.resources;
+        console.log('Discovered resources:', websocketInfo.discoveredResources);
       }
     }
     

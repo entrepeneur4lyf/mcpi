@@ -1,5 +1,13 @@
+// mcpi-common/src/plugin.rs (updated)
 use serde_json::Value;
 use std::error::Error;
+
+// Plugin type to distinguish between core and extension plugins
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginType {
+    Core,    // Built-in core functionality
+    Extension, // Add-on functionality
+}
 
 /// Trait that defines the interface for MCPI plugins
 pub trait McpPlugin: Send + Sync {
@@ -11,6 +19,11 @@ pub trait McpPlugin: Send + Sync {
     
     /// Get the category this plugin belongs to
     fn category(&self) -> &str;
+    
+    /// Get the type of this plugin
+    fn plugin_type(&self) -> PluginType {
+        PluginType::Extension // Default to extension
+    }
     
     /// Get list of operations this plugin supports
     fn supported_operations(&self) -> Vec<String>;

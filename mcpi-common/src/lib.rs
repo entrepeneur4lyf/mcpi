@@ -10,6 +10,7 @@ pub mod plugin_factory;
 pub use plugin::{McpPlugin, PluginResult};
 pub use json_plugin::JsonDataPlugin;
 pub use plugin_factory::PluginFactory;
+pub use plugin::PluginType;
 
 // Protocol version
 pub const MCPI_VERSION: &str = "0.1.0";
