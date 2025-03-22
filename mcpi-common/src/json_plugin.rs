@@ -1,187 +1,160 @@
+// mcpi-common/src/json_plugin.rs
 use crate::plugin::{McpPlugin, PluginResult};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
-
-pub struct JsonDataPlugin {
-    name: String,
-    description: String,
-    category: String,
-    operations: Vec<String>,
-    data_file: String,
-    data_path: String,
-}
-
-impl JsonDataPlugin {
-    pub fn new(
-        name: &str,
-        description: &str, 
-        category: &str,
-        operations: Vec<String>,
-        data_file: &str,
-        data_path: &str,
-    ) -> Self {
-        JsonDataPlugin {
-            name: name.to_string(),
-            description: description.to_string(),
-            category: category.to_string(),
-            operations,
-            data_file: data_file.to_string(),
-            data_path: data_path.to_string(),
+/// A trait that specifies JSON data capabilities
+pub trait JsonDataCapable: Send + Sync {
+    /// Get the path to the data file
+    fn get_data_path(&self) -> &str;
+    
+    /// Load JSON data from the file
+    fn load_data(&self) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let data_path = Path::new(self.get_data_path());
+        info!("Loading data from file: {}", data_path.display());
+        
+        if !data_path.exists() {
+            return Err(format!("Data file does not exist: {}", data_path.display()).into());
+        }
+        
+        let data = fs::read_to_string(data_path)?;
+        let parsed: Value = serde_json::from_str(&data)?;
+        Ok(parsed)
+    }
+    
+    /// Search for items in data matching a query
+    fn search_items(&self, data: &Value, query: &str, field: &str) -> PluginResult {
+        let default_items = Vec::new();
+        let items = data.as_array().unwrap_or(&default_items);
+        
+        let filtered_items: Vec<Value> = items
+            .iter()
+            .filter(|item| {
+                let field_value = item.get(field).and_then(|f| f.as_str()).unwrap_or("");
+                query.is_empty() || field_value.to_lowercase().contains(&query.to_lowercase())
+            })
+            .cloned()
+            .collect();
+        
+        info!("Search operation completed. Found {} items.", filtered_items.len());
+        
+        Ok(json!({
+            "results": filtered_items,
+            "count": filtered_items.len(),
+            "query": query,
+            "field": field
+        }))
+    }
+    
+    /// Get a specific item by ID
+    fn get_item(&self, data: &Value, id: &str) -> PluginResult {
+        let default_items = Vec::new();
+        let items = data.as_array().unwrap_or(&default_items);
+        
+        let item = items
+            .iter()
+            .find(|i| i.get("id").and_then(|id_val| id_val.as_str()) == Some(id))
+            .cloned();
+        
+        match item {
+            Some(i) => {
+                info!("Get operation completed. Found item with ID: {}", id);
+                Ok(i)
+            },
+            None => {
+                warn!("Item not found with ID: {}", id);
+                Ok(json!({
+                    "error": "Item not found",
+                    "id": id
+                }))
+            }
         }
     }
     
-// In mcpi-common/src/json_plugin.rs
-pub fn load_data(&self) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    let data_path = Path::new(&self.data_path).join(&self.data_file);
-    info!("Loading data from file: {}", data_path.display());
-    
-    let data = fs::read_to_string(data_path)?;
-    let parsed: Value = serde_json::from_str(&data)?;
-    Ok(parsed)
-}
+    /// List all items
+    fn list_items(&self, data: &Value) -> PluginResult {
+        let count = data.as_array().map(|a| a.len()).unwrap_or(0);
+        info!("List operation completed. Returning {} items.", count);
+        
+        Ok(json!({
+            "results": data,
+            "count": count
+        }))
+    }
 }
 
-impl McpPlugin for JsonDataPlugin {
+/// A plugin that handles JSON data
+pub struct JsonDataPlugin<T: JsonDataCapable + Send + Sync> {
+    provider: T,
+}
+
+impl<T: JsonDataCapable + Send + Sync> JsonDataPlugin<T> {
+    pub fn new(provider: T) -> Self {
+        JsonDataPlugin { provider }
+    }
+}
+
+impl<T: JsonDataCapable + McpPlugin + Send + Sync> McpPlugin for JsonDataPlugin<T> {
     fn name(&self) -> &str {
-        &self.name
+        self.provider.name()
     }
     
     fn description(&self) -> &str {
-        &self.description
+        self.provider.description()
     }
     
     fn category(&self) -> &str {
-        &self.category
+        self.provider.category()
+    }
+    
+    fn plugin_type(&self) -> crate::plugin::PluginType {
+        self.provider.plugin_type()
     }
     
     fn supported_operations(&self) -> Vec<String> {
-        self.operations.clone()
+        self.provider.supported_operations()
     }
     
     fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "operation": {
-                    "type": "string",
-                    "enum": self.operations,
-                    "description": "Operation to perform"
-                },
-                "query": {
-                    "type": "string",
-                    "description": "Query string for SEARCH operation"
-                },
-                "id": {
-                    "type": "string",
-                    "description": "ID for GET operation"  
-                },
-                "field": {
-                    "type": "string",
-                    "description": "Field to search in for SEARCH operation"
-                }
-            },
-            "required": ["operation"]
-        })
+        self.provider.input_schema()
     }
     
     fn execute(&self, operation: &str, params: &Value) -> PluginResult {
-        info!("Executing operation '{}' for plugin '{}'", operation, self.name);
-        
-        // Check if operation is supported
-        if !self.operations.contains(&operation.to_string()) {
-            let error_message = format!("Operation '{}' not supported for plugin '{}'", operation, self.name);
-            warn!("{}", error_message);
-            return Err(error_message.into());
-        }
-        
-        // Load data
-        let data = match self.load_data() {
-            Ok(data) => {
-                info!("Data loaded successfully for plugin '{}'", self.name);
-                data
-            },
-            Err(e) => {
-                error!("Failed to load data for plugin '{}': {}", self.name, e);
-                return Err(format!("Failed to load data for plugin '{}': {}", self.name, e).into());
-            }
+        // First load the data
+        let data = match self.provider.load_data() {
+            Ok(data) => data,
+            Err(e) => return Err(format!("Failed to load data: {}", e).into()),
         };
         
-        // Process based on operation
+        // Process based on operation type
         match operation {
-            "SEARCH" => {
+            op if op.contains("SEARCH") => {
                 let query = params.get("query").and_then(|q| q.as_str()).unwrap_or("");
                 let field = params.get("field").and_then(|f| f.as_str()).unwrap_or("name");
-                
-                let default_items = Vec::new();
-                let items = data.as_array().unwrap_or(&default_items);
-                
-                let filtered_items: Vec<Value> = items
-                    .iter()
-                    .filter(|item| {
-                        let field_value = item.get(field).and_then(|f| f.as_str()).unwrap_or("");
-                        query.is_empty() || field_value.to_lowercase().contains(&query.to_lowercase())
-                    })
-                    .cloned()
-                    .collect();
-                
-                info!("Search operation completed for plugin '{}'. Found {} items.", self.name, filtered_items.len());
-                
-                Ok(json!({
-                    "results": filtered_items,
-                    "count": filtered_items.len(),
-                    "query": query,
-                    "field": field
-                }))
+                self.provider.search_items(&data, query, field)
             },
-            "GET" => {
+            op if op.contains("GET") => {
                 let id = params.get("id").and_then(|i| i.as_str()).unwrap_or("");
-                
-                let default_items = Vec::new();
-                let items = data.as_array().unwrap_or(&default_items);
-                
-                let item = items
-                    .iter()
-                    .find(|i| i.get("id").and_then(|id_val| id_val.as_str()) == Some(id))
-                    .cloned();
-                
-                match item {
-                    Some(i) => {
-                        info!("Get operation completed for plugin '{}'. Found item with ID: {}", self.name, id);
-                        Ok(i)
-                    },
-                    None => {
-                        warn!("Item not found for plugin '{}' with ID: {}", self.name, id);
-                        Ok(json!({
-                            "error": "Item not found",
-                            "id": id
-                        }))
-                    }
-                }
+                self.provider.get_item(&data, id)
             },
-            "LIST" => {
-                info!("List operation completed for plugin '{}'. Returning all items.", self.name);
-                
-                Ok(json!({
-                    "results": data,
-                    "count": data.as_array().map(|a| a.len()).unwrap_or(0)
-                }))
+            op if op.contains("LIST") => {
+                self.provider.list_items(&data)
             },
             _ => {
-                let error_message = format!("Unsupported operation '{}'", operation);
-                warn!("{}", error_message);
-                Err(error_message.into())
+                // For any other operations, delegate to the provider
+                // But most plugins won't have custom operations so they'll just return errors
+                self.provider.execute(operation, params)
             }
         }
     }
     
     fn get_resources(&self) -> Vec<(String, String, Option<String>)> {
-        vec![(
-            self.name.clone(),
-            format!("mcpi://provider/resources/{}", self.data_file),
-            Some(self.description.clone()),
-        )]
+        self.provider.get_resources()
+    }
+    
+    fn get_capabilities(&self) -> Vec<String> {
+        self.provider.get_capabilities()
     }
 }

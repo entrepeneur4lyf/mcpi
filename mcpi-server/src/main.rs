@@ -1,3 +1,4 @@
+// mcpi-server/src/main.rs
 use axum::{
     extract::{State, WebSocketUpgrade},
     response::IntoResponse,
@@ -24,103 +25,45 @@ mod plugin_registry;
 mod plugins;
 
 use plugin_registry::PluginRegistry;
-use plugins::{WeatherPlugin, HelloPlugin, StorePlugin, WebsitePlugin, SocialPlugin};
 
 // Define paths as constants
-const CONFIG_FILE_PATH: &str = "data/config.json";
-const DATA_PATH: &str = "data/mock";
+const CONFIG_FILE_PATH: &str = "data/config/main.json";
+const DATA_PATH: &str = "data";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    // Validate config and data directories
-    let config_file = Path::new(CONFIG_FILE_PATH);
-    let data_dir = Path::new(DATA_PATH);
-    
-    if !config_file.exists() {
-        tracing::warn!("Config file not found. Please create '{}'.", CONFIG_FILE_PATH);
-        return Err("No configuration file found. Please create config file to continue.".into());
-    }
-    
-    if !data_dir.exists() {
-        tracing::warn!("Data directory not found. Please create '{}'.", DATA_PATH);
-        return Err("No data files found. Please add data files to continue.".into());
-    }
+    // Validate paths
+    validate_paths()?;
 
-    // Initialize plugin registry
-    let registry = Arc::new(PluginRegistry::new());
+    // Load configuration
+    let config = load_config()?;
     
-    // Load configuration file
-    let config_data = fs::read_to_string(config_file)?;
-    let config: Value = serde_json::from_str(&config_data)?;
-    
-    // Extract provider info and referrals for app state
+    // Extract provider info and referrals
     let provider_info = config.get("provider").cloned().unwrap_or_else(|| json!({}));
     let referrals = config.get("referrals").cloned().unwrap_or_else(|| json!([]));
     
-    // Register core plugins
-    let hello_plugin = Arc::new(HelloPlugin::new(DATA_PATH));
-    if let Err(e) = registry.register_plugin(hello_plugin) {
-        tracing::error!("Failed to register hello plugin: {}", e);
-        return Err(e.into());
-    }
-    tracing::info!("Registered core plugin: hello");
-
-    let website_plugin = Arc::new(WebsitePlugin::new(DATA_PATH));
-    if let Err(e) = registry.register_plugin(website_plugin) {
-        tracing::error!("Failed to register website plugin: {}", e);
-        return Err(e.into());
-    }
-    tracing::info!("Registered core plugin: website");
-
-    let store_plugin = Arc::new(StorePlugin::new(DATA_PATH));
-    if let Err(e) = registry.register_plugin(store_plugin) {
-        tracing::error!("Failed to register store plugin: {}", e);
-        return Err(e.into());
-    }
-    tracing::info!("Registered core plugin: store");
-
-    let social_plugin = Arc::new(SocialPlugin::new(referrals.clone()));
-    if let Err(e) = registry.register_plugin(social_plugin) {
-        tracing::error!("Failed to register social plugin: {}", e);
-        return Err(e.into());
-    }
-    tracing::info!("Registered core plugin: social");
-
-    // Register extension plugins
-    let weather_plugin = Arc::new(WeatherPlugin::new());
-    if let Err(e) = registry.register_plugin(weather_plugin) {
-        tracing::error!("Failed to register weather plugin: {}", e);
-        return Err(e.into());
-    }
-    tracing::info!("Registered extension plugin: weather_forecast");
-
-    // Create shared application state
+    // Initialize plugin registry
+    let registry = Arc::new(PluginRegistry::new());
+    
+    // Register all plugins
+    registry.register_all_plugins(DATA_PATH, referrals.clone())?;
+    
+    // Create app state
     let app_state = Arc::new(AppState { 
         registry: registry.clone(),
         provider_info: provider_info.clone(),
         referrals: referrals.clone(),
     });
 
-    // Build CORS layer
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    // Build application with routes
-    let app = Router::new()
-        .route("/mcpi", get(ws_handler))
-        .route("/mcpi/discover", get(discovery_handler))
-        .with_state(app_state)
-        .layer(TraceLayer::new_for_http())
-        .layer(cors);
-
+    // Set up server
+    let app = create_app(app_state);
+    
     // Run the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3001));
-    tracing::info!("MCPI server listening on {}", addr);
+    info!("MCPI server listening on {}", addr);
     
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
@@ -128,6 +71,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap();
     
     Ok(())
+}
+
+// Validate that necessary paths exist
+fn validate_paths() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let config_file = Path::new(CONFIG_FILE_PATH);
+    let data_dir = Path::new(DATA_PATH);
+    
+    if !config_file.exists() {
+        warn!("Config file not found: {}", CONFIG_FILE_PATH);
+        return Err("No configuration file found. Please create config file to continue.".into());
+    }
+    
+    if !data_dir.exists() {
+        warn!("Data directory not found: {}", DATA_PATH);
+        return Err("No data directory found. Please create data directory to continue.".into());
+    }
+    
+    Ok(())
+}
+
+// Load configuration from file
+fn load_config() -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let config_data = fs::read_to_string(CONFIG_FILE_PATH)?;
+    let config: Value = serde_json::from_str(&config_data)?;
+    Ok(config)
+}
+
+// Create the app with routes
+fn create_app(state: Arc<AppState>) -> Router {
+    // Build CORS layer
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    // Build application with routes
+    Router::new()
+        .route("/mcpi", get(ws_handler))
+        .route("/mcpi/discover", get(discovery_handler))
+        .with_state(state)
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
 }
 
 // Handle WebSocket connections for MCP protocol
@@ -150,14 +135,14 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             if let Some(response_text) = response {
                 // Send the response back to the client
                 if let Err(e) = sender.send(Message::Text(response_text)).await {
-                    tracing::error!("Error sending message: {}", e);
+                    error!("Error sending message: {}", e);
                     break;
                 }
             }
         }
     }
     
-    tracing::info!("WebSocket connection closed");
+    info!("WebSocket connection closed");
 }
 
 // Process an MCP message
@@ -348,24 +333,32 @@ fn handle_list_resources(request: &MCPRequest, state: &Arc<AppState>) -> String 
 fn handle_read_resource(request: &MCPRequest, _state: &Arc<AppState>) -> String {
     if let Some(params) = &request.params {
         if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
-            tracing::info!("Resource URI requested: {}", uri);
+            info!("Resource URI requested: {}", uri);
 
-            // Extract filename from URI
-            // Format: mcpi://domain/resources/filename.json
-            let parts: Vec<&str> = uri.split('/').collect();
+            // Parse the URI to extract the resource path
+            // Format: mcpi://domain/resources/plugin-type/resource-name/data.json
+            // Example: mcpi://example.com/resources/store/products/data.json
             
-            if parts.len() >= 4 {
+            let parts: Vec<&str> = uri.split('/').collect();
+            if parts.len() >= 6 {
+                // Extract the resource path starting from the DATA_PATH
+                // Construct a path like: data/store/products/data.json
+                let resource_path = format!("{}/{}/{}", 
+                    DATA_PATH, 
+                    parts[parts.len() - 3], // plugin type (e.g., store)
+                    parts[parts.len() - 2]  // resource name (e.g., products)
+                );
+                
                 let filename = parts.last().unwrap();
+                let full_path = format!("{}/{}", resource_path, filename);
                 
-                // Construct the full path to the JSON file
-                let data_path = Path::new(DATA_PATH).join(filename);
+                let data_path = Path::new(&full_path);
                 
-                // Log the file path
-                tracing::info!("Looking for file: {}", data_path.display());
+                info!("Looking for file: {}", data_path.display());
                 
                 // Check if the file exists
                 if data_path.exists() {
-                    tracing::info!("File exists: {}", data_path.display());
+                    info!("File exists: {}", data_path.display());
                     
                     // Read the JSON file
                     match fs::read_to_string(data_path) {
@@ -387,7 +380,7 @@ fn handle_read_resource(request: &MCPRequest, _state: &Arc<AppState>) -> String 
                             return response.to_string();
                         },
                         Err(e) => {
-                            tracing::error!("Error reading file: {}", e);
+                            error!("Error reading file: {}", e);
                             return create_error_response(
                                 request.id.clone(),
                                 100,
@@ -396,11 +389,11 @@ fn handle_read_resource(request: &MCPRequest, _state: &Arc<AppState>) -> String 
                         }
                     }
                 } else {
-                    tracing::warn!("File does not exist: {}", data_path.display());
+                    warn!("File does not exist: {}", data_path.display());
                     return create_error_response(
                         request.id.clone(),
                         100,
-                        format!("Resource file not found: {}", filename),
+                        format!("Resource file not found: {}", full_path),
                     );
                 }
             }

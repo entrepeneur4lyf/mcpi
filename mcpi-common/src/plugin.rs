@@ -1,4 +1,4 @@
-// mcpi-common/src/plugin.rs (updated)
+// mcpi-common/src/plugin.rs
 use serde_json::Value;
 use std::error::Error;
 

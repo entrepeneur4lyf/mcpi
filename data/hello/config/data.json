@@ -1,0 +1,29 @@
+{
+    "default": {
+      "introduction": "Hello! I'm the AI assistant for Example Store, an online retailer of eco-friendly products. How can I assist you today?",
+      "metadata": {
+        "provider": {
+          "name": "Example Store",
+          "domain": "example.com",
+          "description": "Online retailer of eco-friendly products"
+        },
+        "primary_focus": ["sustainability", "eco-friendly", "zero-waste"],
+        "key_offerings": ["bamboo products", "recycled goods", "sustainable alternatives"],
+        "unique_selling_points": ["carbon-neutral shipping", "plastic-free packaging"]
+      }
+    },
+    "contexts": {
+      "shopping": {
+        "introduction": "Welcome to Example Store! We offer a wide range of eco-friendly products with free shipping on orders over $50. Our most popular categories include kitchen supplies, personal care, and home goods.",
+        "highlight_capabilities": ["product_search", "order_history"]
+      },
+      "business": {
+        "introduction": "Example Store provides sustainable product solutions for businesses of all sizes. We offer bulk discounts, corporate gifting, and custom branding options.",
+        "highlight_capabilities": ["wholesale_inquiry", "business_accounts"]
+      },
+      "support": {
+        "introduction": "Welcome to Example Store support! How can I help you today? I can assist with order tracking, returns, product information, or general questions about our eco-friendly merchandise.",
+        "highlight_capabilities": ["order_history", "product_reviews"]
+      }
+    }
+  }

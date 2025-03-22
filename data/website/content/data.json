@@ -137,35 +137,6 @@
       "page_type": "shipping"
     },
     {
-      "id": "privacy",
-      "title": "Privacy Policy",
-      "content": "At Example Store, we take your privacy seriously. This policy outlines how we collect, use, and protect your personal information.",
-      "last_updated": "2025-01-05",
-      "sections": [
-        {
-          "heading": "Information We Collect",
-          "content": "We collect information you provide directly to us, such as your name, email address, shipping address, and payment information when you make a purchase. We also collect certain information automatically when you use our website, including your IP address, browser type, and browsing behavior."
-        },
-        {
-          "heading": "How We Use Your Information",
-          "content": "We use your information to process and fulfill your orders, communicate with you about products and services, and improve our website and customer experience. We may also use your information for marketing purposes, such as sending you newsletters or product recommendations."
-        },
-        {
-          "heading": "Information Sharing",
-          "content": "We do not sell or rent your personal information to third parties. We may share your information with service providers who help us operate our business, such as payment processors and shipping companies. We may also share your information if required by law or to protect our rights."
-        },
-        {
-          "heading": "Data Security",
-          "content": "We implement appropriate security measures to protect your personal information from unauthorized access, alteration, or disclosure. All payment information is encrypted using industry-standard protocols."
-        },
-        {
-          "heading": "Your Choices",
-          "content": "You can opt out of receiving marketing communications from us at any time by clicking the 'unsubscribe' link in our emails or contacting us directly. You can also request access to, correction of, or deletion of your personal information by contacting our privacy team."
-        }
-      ],
-      "page_type": "policy"
-    },
-    {
       "id": "sustainability",
       "title": "Our Sustainability Commitment",
       "content": "Sustainability isn't just a buzzword for us—it's at the core of everything we do. Here's how we're working to minimize our environmental impact and maximize our positive contribution.",

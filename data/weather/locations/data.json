@@ -1,0 +1,119 @@
+{
+    "locations": [
+      {
+        "name": "New York",
+        "country": "United States",
+        "coordinates": {
+          "latitude": 40.7128,
+          "longitude": -74.0060
+        },
+        "timezone": "America/New_York",
+        "climate_zone": "humid_continental",
+        "featured": true
+      },
+      {
+        "name": "London",
+        "country": "United Kingdom",
+        "coordinates": {
+          "latitude": 51.5074,
+          "longitude": -0.1278
+        },
+        "timezone": "Europe/London",
+        "climate_zone": "maritime_temperate",
+        "featured": true
+      },
+      {
+        "name": "Tokyo",
+        "country": "Japan",
+        "coordinates": {
+          "latitude": 35.6762,
+          "longitude": 139.6503
+        },
+        "timezone": "Asia/Tokyo",
+        "climate_zone": "humid_subtropical",
+        "featured": true
+      },
+      {
+        "name": "Sydney",
+        "country": "Australia",
+        "coordinates": {
+          "latitude": -33.8688,
+          "longitude": 151.2093
+        },
+        "timezone": "Australia/Sydney",
+        "climate_zone": "humid_subtropical",
+        "featured": true
+      },
+      {
+        "name": "Paris",
+        "country": "France",
+        "coordinates": {
+          "latitude": 48.8566,
+          "longitude": 2.3522
+        },
+        "timezone": "Europe/Paris",
+        "climate_zone": "maritime_temperate",
+        "featured": true
+      },
+      {
+        "name": "Berlin",
+        "country": "Germany",
+        "coordinates": {
+          "latitude": 52.5200,
+          "longitude": 13.4050
+        },
+        "timezone": "Europe/Berlin",
+        "climate_zone": "maritime_temperate",
+        "featured": false
+      },
+      {
+        "name": "Rio de Janeiro",
+        "country": "Brazil",
+        "coordinates": {
+          "latitude": -22.9068,
+          "longitude": -43.1729
+        },
+        "timezone": "America/Sao_Paulo",
+        "climate_zone": "tropical_savanna",
+        "featured": false
+      },
+      {
+        "name": "Cape Town",
+        "country": "South Africa",
+        "coordinates": {
+          "latitude": -33.9249,
+          "longitude": 18.4241
+        },
+        "timezone": "Africa/Johannesburg",
+        "climate_zone": "mediterranean",
+        "featured": false
+      },
+      {
+        "name": "Singapore",
+        "country": "Singapore",
+        "coordinates": {
+          "latitude": 1.3521,
+          "longitude": 103.8198
+        },
+        "timezone": "Asia/Singapore",
+        "climate_zone": "tropical_rainforest",
+        "featured": false
+      },
+      {
+        "name": "Moscow",
+        "country": "Russia",
+        "coordinates": {
+          "latitude": 55.7558,
+          "longitude": 37.6173
+        },
+        "timezone": "Europe/Moscow",
+        "climate_zone": "continental",
+        "featured": false
+      }
+    ],
+    "default_settings": {
+      "units": "metric",
+      "forecast_days": 3,
+      "refresh_interval_minutes": 60
+    }
+  }

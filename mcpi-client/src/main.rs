@@ -1,3 +1,4 @@
+// mcpi-client/src/main.rs
 use futures::{SinkExt, StreamExt};
 use mcpi_common::{
     DiscoveryResponse, InitializeResult, MCPRequest, MCPResponse, ReadResourceResult, ToolCallResult
@@ -5,50 +6,55 @@ use mcpi_common::{
 use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use std::error::Error;
-use clap::{Arg, Command};
+use clap::{Parser, Subcommand};
 mod discovery;
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Domain to discover MCPI services from (uses DNS TXT records)
+    #[arg(short, long)]
+    domain: Option<String>,
+    
+    /// Direct URL to MCPI server (bypasses DNS discovery)
+    #[arg(short, long)]
+    url: Option<String>,
+    
+    /// Test a specific plugin only
+    #[arg(short, long)]
+    plugin: Option<String>,
+    
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Discover MCPI services for a domain
+    Discover { domain: String },
+    
+    /// Connect to an MCPI server and test it
+    Connect { url: String },
+    
+    /// Test a specific plugin
+    Test { plugin: String },
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // Parse command line arguments
-    let matches = Command::new("MCPI Client")
-        .version("0.1.0")
-        .author("MCPI Team")
-        .about("Model Context Protocol Integration Client")
-        .arg(Arg::new("domain")
-            .short('d')
-            .long("domain")
-            .value_name("DOMAIN")
-            .help("Domain to discover MCPI services from (uses DNS TXT records)")
-            .required(false))
-        .arg(Arg::new("url")
-            .short('u')
-            .long("url")
-            .value_name("URL")
-            .help("Direct URL to MCPI server (bypasses DNS discovery)")
-            .required(false))
-        .arg(Arg::new("plugin")
-            .short('p')
-            .long("plugin")
-            .value_name("PLUGIN")
-            .help("Test a specific plugin only")
-            .required(false))
-        .get_matches();
-
+    let cli = Cli::parse();
+    
     // Determine discovery and WebSocket URLs
-    let (discovery_url, ws_url) = if let Some(domain) = matches.get_one::<String>("domain") {
+    let (discovery_url, ws_url) = if let Some(domain) = cli.domain {
         println!("Performing DNS-based discovery for domain: {}", domain);
         
-        match discovery::discover_mcp_services(domain).await {
+        match discovery::discover_mcp_services(&domain).await {
             Ok(service_info) => {
                 println!("Discovered MCP service:");
                 println!("  Version: {}", service_info.version);
                 println!("  Endpoint: {}", service_info.endpoint);
                 
                 let discovery = service_info.endpoint;
-                
-                // We'll derive the WebSocket URL after making the discovery request
-                println!("Using discovery endpoint: {}", discovery);
                 
                 // Derive WebSocket URL from discovery URL
                 let websocket = if discovery.starts_with("https://") {
@@ -64,7 +70,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 return Err(format!("DNS discovery failed for domain '{}': {}", domain, e).into());
             }
         }
-    } else if let Some(url) = matches.get_one::<String>("url") {
+    } else if let Some(url) = cli.url {
         // If user provides a direct WebSocket URL
         let ws_url = url.clone();
         
@@ -160,7 +166,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     
-    // List resources
+    // List resources to show what's available
     let list_resources_request = MCPRequest {
         jsonrpc: "2.0".to_string(),
         id: json!(2),
@@ -189,38 +195,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     
-    // Read a resource
-    let read_resource_request = MCPRequest {
-        jsonrpc: "2.0".to_string(),
-        id: json!(3),
-        method: "resources/read".to_string(),
-        params: Some(json!({
-            "uri": format!("mcpi://{}/resources/products.json", discovery_resp.provider.domain)
-        })),
-    };
-    
-    write.send(Message::Text(serde_json::to_string(&read_resource_request)?)).await
-        .map_err(|_| "WebSocket send error")?;
-    
-    if let Some(Ok(Message::Text(response))) = read.next().await {
-        let parsed: MCPResponse = serde_json::from_str(&response)?;
-        if let Some(result) = parsed.result {
-            let read_result: ReadResourceResult = serde_json::from_value(result)?;
-            println!("\nResource content sample (first 150 chars):");
-            for content in read_result.contents {
-                println!("  URI: {}", content.uri);
-                println!("  Type: {}", content.mime_type.unwrap_or_else(|| "unknown".to_string()));
-                println!("  Content: {}", content.text.chars().take(150).collect::<String>() + "...");
-            }
-        } else if let Some(error) = parsed.error {
-            println!("Error reading resource: {} (code: {})", error.message, error.code);
-        }
-    }
-    
     // List tools
     let list_tools_request = MCPRequest {
         jsonrpc: "2.0".to_string(),
-        id: json!(4),
+        id: json!(3),
         method: "tools/list".to_string(),
         params: Some(json!({})),
     };
@@ -265,7 +243,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     
     // Check if user wants to test a specific plugin
-    let specific_plugin = matches.get_one::<String>("plugin").map(|s| s.to_string());
+    let specific_plugin = cli.plugin;
     
     // If a specific plugin is requested, only test that one
     let tools_to_test = if let Some(plugin) = specific_plugin {
@@ -305,34 +283,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         
         println!("Supported operations: {:?}", operations);
         
-        // Test each supported operation
+        // Test each supported operation with dynamically generated test arguments
         for operation in operations {
-            // Create appropriate arguments based on operation
-            let arguments = match operation.as_str() {
-                op if op.contains("SEARCH") || op == "SEARCH" => {
-                    json!({"query": "example"})
-                },
-                op if op.contains("GET") || op == "GET" => {
-                    // Pick first ID from tool name to generate a plausible ID
-                    let id_prefix = match tool_name.as_str() {
-                        "store" => "eco-1001",
-                        "website" => "about",
-                        "hello" => "",  // No ID needed for HELLO operation
-                        "social" => "ecoshipping.com", // A domain for referral
-                        _ => "sample-id"
-                    };
-                    json!({"id": id_prefix})
-                },
-                "HELLO" => {
-                    json!({"context": "shopping", "detail_level": "standard"})
-                },
-                "LIST_PRODUCTS" | "LIST_CUSTOMERS" | "LIST_ORDERS" | "LIST_REVIEWS" | "LIST_REFERRALS" | "LIST" => {
-                    json!({})
-                },
-                _ => json!({})
-            };
+            // Analyze the operation and schema to generate appropriate test arguments
+            let arguments = generate_test_arguments(&tool_name, &operation, &tool_schema);
             
-            // Call the tool with the appropriate operation and arguments
+            // Call the tool with the generated arguments
             call_tool(&mut write, &mut read, &tool_name, &operation, arguments).await?;
         }
     }
@@ -362,6 +318,127 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+// Generate test arguments dynamically based on the operation and schema
+fn generate_test_arguments(tool_name: &str, operation: &str, schema: &Value) -> Value {
+    // Create a base arguments object with the operation
+    let mut arguments = json!({
+        "operation": operation
+    });
+    
+    // Get the properties object from the schema
+    if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+        // For each property in the schema (except 'operation' which we already handled)
+        for (prop_name, prop_schema) in properties.iter().filter(|(k, _)| *k != "operation") {
+            // Get the property description to help us generate an appropriate value
+            let description = prop_schema.get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
+            
+            // Get the property type if available
+            let prop_type = prop_schema.get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("string");
+            
+            // Generate a test value based on the property name, description, and operation
+            let test_value = match (prop_name.as_str(), prop_type, operation) {
+                // ID parameter
+                ("id", _, _) if description.to_lowercase().contains("id") => {
+                    // Look for clues about the ID format in the operation name
+                    if operation.contains("PRODUCT") {
+                        json!("product-01")
+                    } else if operation.contains("CUSTOMER") {
+                        json!("customer-01")
+                    } else if operation.contains("ORDER") {
+                        json!("order-01")
+                    } else if operation.contains("REVIEW") {
+                        json!("review-01")
+                    } else {
+                        json!("sample-id")
+                    }
+                },
+                
+                // Query parameter
+                ("query", _, _) if description.to_lowercase().contains("query") => {
+                    // Generate a simple query string
+                    json!("test")
+                },
+                
+                // Context parameter (for HELLO operation)
+                ("context", _, "HELLO") => {
+                    json!("general")
+                },
+                
+                // Detail level parameter (for HELLO operation)
+                ("detail_level", _, "HELLO") => {
+                    json!("standard")
+                },
+                
+                // Location parameter (for weather)
+                ("location", _, _) if description.to_lowercase().contains("location") => {
+                    json!("New York")
+                },
+                
+                // Domain parameter (for referrals)
+                ("domain", _, _) if description.to_lowercase().contains("domain") => {
+                    json!("example.com")
+                },
+                
+                // Relationship parameter (for referrals)
+                ("relationship", _, _) if description.to_lowercase().contains("relationship") => {
+                    json!("trusted")
+                },
+                
+                // Type parameter (for filtering content)
+                ("type", _, _) => {
+                    json!("news")
+                },
+                
+                // Field parameter (for specifying search fields)
+                ("field", _, _) => {
+                    json!("name")
+                },
+                
+                // Sort parameters
+                ("sort_by", _, _) => {
+                    json!("date")
+                },
+                ("order", _, _) => {
+                    json!("desc")
+                },
+                
+                // Default for any other string parameters
+                (_, "string", _) => {
+                    json!("test_value")
+                },
+                
+                // Default for numeric parameters
+                (_, "number", _) | (_, "integer", _) => {
+                    json!(1)
+                },
+                
+                // Default for boolean parameters
+                (_, "boolean", _) => {
+                    json!(true)
+                },
+                
+                // Default for any other parameters
+                (_, _, _) => {
+                    json!(null)
+                }
+            };
+            
+            // Add the test value to the arguments if it's not null
+            if !test_value.is_null() {
+                if let Some(obj) = arguments.as_object_mut() {
+                    obj.insert(prop_name.clone(), test_value);
+                }
+            }
+        }
+    }
+    
+    arguments
+}
+
 async fn discover_service_http(url: &str) -> Result<DiscoveryResponse, Box<dyn Error>> {
     let client = reqwest::Client::new();
     let resp = client
@@ -388,24 +465,13 @@ where
 {
     println!("\nTesting {} with {} operation", name, operation);
     
-    // Create a new arguments object with the operation included
-    let mut args = serde_json::Map::new();
-    args.insert("operation".to_string(), json!(operation));
-    
-    // Add all other arguments
-    if let Some(arg_obj) = arguments.as_object() {
-        for (key, value) in arg_obj {
-            args.insert(key.clone(), value.clone());
-        }
-    }
-    
     let request = MCPRequest {
         jsonrpc: "2.0".to_string(),
         id: json!(99),
         method: "tools/call".to_string(),
         params: Some(json!({
             "name": name,
-            "arguments": args
+            "arguments": arguments
         })),
     };
     

@@ -1,12 +1,13 @@
-// mcpi-server/src/plugins/mod.rs (updated)
-pub mod weather_plugin;
-pub mod hello_plugin;
-pub mod store_plugin;
-pub mod website_plugin;
-pub mod social_plugin;
+// mcpi-server/src/plugins/mod.rs
+pub mod hello;
+pub mod store;
+pub mod website;
+pub mod social;
+pub mod weather;
 
-pub use weather_plugin::WeatherPlugin;
-pub use hello_plugin::HelloPlugin;
-pub use store_plugin::StorePlugin;
-pub use website_plugin::WebsitePlugin;
-pub use social_plugin::SocialPlugin;
+// Re-export plugin factory functions for convenience
+pub use hello::create_plugin as create_hello_plugin;
+pub use store::create_plugins as create_store_plugins;
+pub use website::create_plugin as create_website_plugin;
+pub use social::create_plugin as create_social_plugin;
+pub use weather::create_plugin as create_weather_plugin;

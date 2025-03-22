@@ -1,0 +1,47 @@
+[
+    {
+      "name": "Eco Shipping",
+      "domain": "ecoshipping.com",
+      "relationship": "trusted",
+      "description": "Carbon-neutral shipping and logistics services",
+      "services": ["package delivery", "carbon offsetting", "eco-friendly packaging"],
+      "integration_level": "deep",
+      "logo_url": "https://ecoshipping.com/logo.svg"
+    },
+    {
+      "name": "Green Packaging",
+      "domain": "greenpack.co",
+      "relationship": "partner",
+      "description": "Sustainable packaging solutions for e-commerce",
+      "services": ["compostable mailers", "recycled boxes", "plastic-free tape"],
+      "integration_level": "medium",
+      "logo_url": "https://greenpack.co/logo.svg"
+    },
+    {
+      "name": "Sustainability Certification",
+      "domain": "eco-cert.org",
+      "relationship": "verified",
+      "description": "Independent certification of environmental claims",
+      "services": ["product certification", "supply chain auditing", "sustainability reporting"],
+      "integration_level": "light",
+      "logo_url": "https://eco-cert.org/logo.svg"
+    },
+    {
+      "name": "Recycling Solutions",
+      "domain": "recycle-it.org",
+      "relationship": "affiliate",
+      "description": "End-of-life product recycling programs",
+      "services": ["product takeback", "material recovery", "upcycling initiatives"],
+      "integration_level": "light",
+      "logo_url": "https://recycle-it.org/logo.svg"
+    },
+    {
+      "name": "Eco Marketplace",
+      "domain": "ecomarket.com",
+      "relationship": "marketplace",
+      "description": "Online marketplace for sustainable products",
+      "services": ["product listing", "cross-selling", "joint promotions"],
+      "integration_level": "medium",
+      "logo_url": "https://ecomarket.com/logo.svg"
+    }
+  ]
