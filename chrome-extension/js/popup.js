@@ -428,7 +428,7 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
 // Generate appropriate test parameters for a quick action
-async function generateTestParams(tool, operation) {
+function generateTestParams(tool, operation) {
   // Default params object
   const params = {};
   
@@ -437,50 +437,27 @@ async function generateTestParams(tool, operation) {
     params.context = "general";
   }
   else if (operation.includes("GET") || operation === "GET") {
-    // For GET operations, we need to find a real ID
-    // First determine which entity type we're working with
-    let listOp = "LIST";
-    let idField = "id";
-    
+    // Specific default IDs for each tool type
     if (tool.name === "store_product") {
-      listOp = "LIST_PRODUCTS";
-    } else if (tool.name === "store_customer") {
-      listOp = "LIST_CUSTOMERS";
-    } else if (tool.name === "store_order") {
-      listOp = "LIST_ORDERS";
-    } else if (tool.name === "store_review") {
-      listOp = "LIST_REVIEWS";
-    } else if (tool.name === "weather_forecast") {
-      // Special case for weather forecast - it needs a location parameter
-      params.location = "New York";
-      return params; // Return early with location parameter
+      params.id = "eco-1001";
+    } 
+    else if (tool.name === "store_customer") {
+      params.id = "cust-1001";
+    } 
+    else if (tool.name === "store_order") {
+      params.id = "order-5001";
+    } 
+    else if (tool.name === "store_review") {
+      params.id = "rev-2001";
+    } 
+    else if (tool.name === "website") {
+      params.id = "about";
     }
-    
-    // Fetch entity data if needed
-    try {
-      const entities = await getEntityData(tool.name, listOp);
-      
-      if (entities && entities.length > 0) {
-        // Get the first entity's ID
-        params.id = entities[0].id;
-      } else {
-        // Fallback to some default IDs if no entities found
-        if (tool.name === "store_product") params.id = "eco-1001";
-        else if (tool.name === "store_customer") params.id = "cust-1001";
-        else if (tool.name === "store_order") params.id = "order-5001";
-        else if (tool.name === "store_review") params.id = "rev-2001";
-        else if (tool.name === "website") params.id = "about";
-        else params.id = "sample-id";
-      }
-    } catch (error) {
-      console.error(`Error fetching data for ${tool.name}:`, error);
-      // Fallback to some default IDs
-      if (tool.name === "store_product") params.id = "eco-1001";
-      else if (tool.name === "store_customer") params.id = "cust-1001";
-      else if (tool.name === "store_order") params.id = "order-5001";
-      else if (tool.name === "store_review") params.id = "rev-2001";
-      else if (tool.name === "website") params.id = "about";
-      else params.id = "sample-id";
+    else if (tool.name === "weather_forecast") {
+      params.location = "New York";
+    }
+    else {
+      params.id = "sample-id";
     }
   }
   else if (operation.includes("SEARCH") || operation === "SEARCH") {
@@ -488,25 +465,36 @@ async function generateTestParams(tool, operation) {
     params.query = "test";
     
     // Use appropriate field names based on the entity
-    if (tool.name === "store_product") params.field = "name";
-    else if (tool.name === "store_customer") params.field = "name";
-    else if (tool.name === "store_review") params.field = "content";
-    else if (tool.name === "website") params.field = "title";
-    else params.field = "name";
+    if (tool.name === "store_product") {
+      params.field = "name";
+    }
+    else if (tool.name === "store_customer") {
+      params.field = "name";
+    }
+    else if (tool.name === "store_review") {
+      params.field = "content";
+    }
+    else if (tool.name === "website") {
+      params.field = "title";
+    }
+    else {
+      params.field = "name";
+    }
   }
   
   return params;
 }
 
 // Generate a meaningful label for a quick action
-async function generateActionLabel(tool, operation, params) {
-  let label = operation;
-  
+function generateActionLabel(tool, operation, params) {
   // Make labels more user-friendly
   if (operation === "HELLO") {
     return "Get site introduction";
   }
   else if (operation.includes("LIST") || operation === "LIST") {
+    if (tool.name === "weather_forecast") {
+      return "List all forecasts";
+    }
     return `List all ${operation.replace("LIST_", "").toLowerCase()}`;
   }
   else if (operation.includes("SEARCH") || operation === "SEARCH") {
@@ -514,19 +502,31 @@ async function generateActionLabel(tool, operation, params) {
   }
   else if (operation.includes("GET") || operation === "GET") {
     // For GET operations, try to include the entity name
-    const id = params.id;
-    
-    // Default labels with prefix
-    if (tool.name === "store_product") return `View product: ${id}`;
-    else if (tool.name === "store_customer") return `View customer: ${id}`;
-    else if (tool.name === "store_order") return `View order: ${id}`;
-    else if (tool.name === "store_review") return `View review: ${id}`;
-    else if (tool.name === "website" && id === "about") return `View page: About`;
-    else return `View item: ${id}`;
+    if (tool.name === "store_product") {
+      return `View product: ${params.id || ""}`;
+    } 
+    else if (tool.name === "store_customer") {
+      return `View customer: ${params.id || ""}`;
+    } 
+    else if (tool.name === "store_order") {
+      return `View order: ${params.id || ""}`;
+    } 
+    else if (tool.name === "store_review") {
+      return `View review: ${params.id || ""}`;
+    } 
+    else if (tool.name === "website" && params.id === "about") {
+      return "View About page";
+    }
+    else if (tool.name === "weather_forecast") {
+      return `View forecast: ${params.location || "New York"}`;
+    }
+    else {
+      return `View item: ${params.id || "sample-id"}`;
+    }
   }
   
   // Default case
-  return `${operation}`;
+  return `${operation} operation`;
 }
 
 // Create dynamic quick actions for a tool
@@ -621,53 +621,155 @@ async function createDynamicQuickActions(tool) {
   }
   
   // Update the function that adds tools to the list
-  async function updateToolsList(tools) {
-    toolsList.innerHTML = '';
+  // Replace the generateTestParams function in popup.js
+
+function generateTestParams(tool, operation) {
+  // Default params object
+  const params = {};
+  
+  // Different parameters based on tool and operation type
+  if (operation === "HELLO") {
+    params.context = "general";
+  }
+  else if (operation.includes("GET") || operation === "GET") {
+    // Specific default IDs for each tool type
+    if (tool.name === "store_product") {
+      params.id = "eco-1001";
+    } 
+    else if (tool.name === "store_customer") {
+      params.id = "cust-1001";
+    } 
+    else if (tool.name === "store_order") {
+      params.id = "order-5001";
+    } 
+    else if (tool.name === "store_review") {
+      params.id = "rev-2001";
+    } 
+    else if (tool.name === "website") {
+      params.id = "about";
+    }
+    else if (tool.name === "weather_forecast") {
+      params.location = "New York";
+    }
+    else {
+      params.id = "sample-id";
+    }
+  }
+  else if (operation.includes("SEARCH") || operation === "SEARCH") {
+    // For search operations, use reasonable defaults
+    params.query = "test";
     
-    for (const tool of tools) {
-      const item = document.createElement('div');
-      item.className = 'list-item tool-item';
-      
-      // Extract operations from input schema
-      const operations = extractOperationsFromSchema(tool.inputSchema);
-      
-      let toolHtml = `
-        <h3>${tool.name}</h3>
-        <p>${tool.description || 'No description available'}</p>
-        <div class="meta">
-          <span class="operations">${operations.join(', ')}</span>
-        </div>`;
-      
-      // Add loading indicator for quick actions
-      toolHtml += `<div class="quick-actions" id="quick-actions-${tool.name}">`;
-      toolHtml += '<span class="loading">Loading actions...</span>';
-      toolHtml += '</div>';
-      
-      item.innerHTML = toolHtml;
-      
-      // Add click handler to open tool execution panel
-      item.querySelector('h3').addEventListener('click', function() {
-        openToolExecutionPanel(tool);
-      });
-      
-      toolsList.appendChild(item);
-      
-      // Now asynchronously create quick actions
-      const quickActions = await createDynamicQuickActions(tool);
-      
+    // Use appropriate field names based on the entity
+    if (tool.name === "store_product") {
+      params.field = "name";
+    }
+    else if (tool.name === "store_customer") {
+      params.field = "name";
+    }
+    else if (tool.name === "store_review") {
+      params.field = "content";
+    }
+    else if (tool.name === "website") {
+      params.field = "title";
+    }
+    else {
+      params.field = "name";
+    }
+  }
+  
+  return params;
+}
+
+// Replace the generateActionLabel function
+
+function generateActionLabel(tool, operation, params) {
+  // Make labels more user-friendly
+  if (operation === "HELLO") {
+    return "Get site introduction";
+  }
+  else if (operation.includes("LIST") || operation === "LIST") {
+    if (tool.name === "weather_forecast") {
+      return "List all forecasts";
+    }
+    return `List all ${operation.replace("LIST_", "").toLowerCase()}`;
+  }
+  else if (operation.includes("SEARCH") || operation === "SEARCH") {
+    return `Search ${operation.replace("SEARCH_", "").toLowerCase()}`;
+  }
+  else if (operation.includes("GET") || operation === "GET") {
+    // For GET operations, try to include the entity name
+    if (tool.name === "store_product") {
+      return `View product: ${params.id || ""}`;
+    } 
+    else if (tool.name === "store_customer") {
+      return `View customer: ${params.id || ""}`;
+    } 
+    else if (tool.name === "store_order") {
+      return `View order: ${params.id || ""}`;
+    } 
+    else if (tool.name === "store_review") {
+      return `View review: ${params.id || ""}`;
+    } 
+    else if (tool.name === "website" && params.id === "about") {
+      return "View About page";
+    }
+    else if (tool.name === "weather_forecast") {
+      return `View forecast: ${params.location || "New York"}`;
+    }
+    else {
+      return `View item: ${params.id || "sample-id"}`;
+    }
+  }
+  
+  // Default case
+  return `${operation} operation`;
+}
+
+// Update the updateToolsList function to fix the layout of action sections
+
+function updateToolsList(tools) {
+  toolsList.innerHTML = '';
+  
+  for (const tool of tools) {
+    const item = document.createElement('div');
+    item.className = 'list-item tool-item';
+    
+    // Extract operations from input schema
+    const operations = extractOperationsFromSchema(tool.inputSchema);
+    
+    let toolHtml = `
+      <h3>${tool.name}</h3>
+      <p>${tool.description || 'No description available'}</p>
+      <div class="meta">
+        <span class="operations">${operations.join(', ')}</span>
+      </div>`;
+    
+    // Add loading indicator for quick actions
+    toolHtml += `<div class="quick-actions" id="quick-actions-${tool.name}">`;
+    toolHtml += '<span class="loading">Loading actions...</span>';
+    toolHtml += '</div>';
+    
+    item.innerHTML = toolHtml;
+    
+    // Add click handler to open tool execution panel
+    item.querySelector('h3').addEventListener('click', function() {
+      openToolExecutionPanel(tool);
+    });
+    
+    toolsList.appendChild(item);
+    
+    // Now asynchronously create quick actions
+    createDynamicQuickActions(tool).then(quickActions => {
       // Replace loading indicator with quick actions
       const quickActionsContainer = item.querySelector('.quick-actions');
       quickActionsContainer.innerHTML = '';
       
-      // First add API operation buttons (discovery operations)
+      // API Operations section
       const discoveryActions = quickActions.filter(action => action.type === "discovery");
       if (discoveryActions.length > 0) {
         const apiSection = document.createElement('div');
         apiSection.className = 'action-section';
         apiSection.innerHTML = '<h4>API Operations</h4>';
-        
-        const buttonsContainer = document.createElement('div');
-        buttonsContainer.className = 'buttons-wrapper';
         
         discoveryActions.forEach(action => {
           const button = document.createElement('button');
@@ -692,22 +794,21 @@ async function createDynamicQuickActions(tool) {
             }
           });
           
-          buttonsContainer.appendChild(button);
+          apiSection.appendChild(button);
         });
         
-        apiSection.appendChild(buttonsContainer);
         quickActionsContainer.appendChild(apiSection);
       }
       
-      // Then add test operation buttons
+      // Clear any floats before the test section
+      quickActionsContainer.appendChild(document.createElement('div')).style.clear = 'both';
+      
+      // Test Operations section - in a new container for proper alignment
       const testActions = quickActions.filter(action => action.type === "test");
       if (testActions.length > 0) {
         const testSection = document.createElement('div');
         testSection.className = 'action-section test-actions';
         testSection.innerHTML = '<h4>Test Operations</h4>';
-        
-        const buttonsContainer = document.createElement('div');
-        buttonsContainer.className = 'buttons-wrapper';
         
         testActions.forEach(action => {
           const button = document.createElement('button');
@@ -716,7 +817,6 @@ async function createDynamicQuickActions(tool) {
           button.setAttribute('data-operation', action.operation);
           button.setAttribute('data-params', JSON.stringify(action.params));
           button.textContent = action.label;
-          button.title = action.label; // Add title for hover text on overflow
           
           // Add click handler
           button.addEventListener('click', function(e) {
@@ -733,19 +833,19 @@ async function createDynamicQuickActions(tool) {
             }
           });
           
-          buttonsContainer.appendChild(button);
+          testSection.appendChild(button);
         });
         
-        testSection.appendChild(buttonsContainer);
         quickActionsContainer.appendChild(testSection);
       }
       
       if (quickActions.length === 0) {
         quickActionsContainer.innerHTML = '<span>No actions available</span>';
       }
-    }
+    });
   }
-  
+}
+
   // Execute a quick action
   function executeQuickAction(tool, operation, params) {
     // Show tool execution panel with pre-filled values
