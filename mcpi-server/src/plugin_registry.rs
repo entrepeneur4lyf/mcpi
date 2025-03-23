@@ -1,5 +1,5 @@
 // mcpi-server/src/plugin_registry.rs
-use mcpi_common::{McpPlugin, PluginResult};
+use mcpi_common::{McpPlugin, PluginResult, JsonDataPlugin};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -75,11 +75,12 @@ impl PluginRegistry {
         let hello_plugin = hello::create_plugin(data_path)?;
         self.register_plugin(hello_plugin)?;
         
-        // Register website plugin
-        let website_plugin = website::create_plugin(data_path)?;
+        // Register website plugin - now wrapped with JsonDataPlugin
+        let website_inner_plugin = website::WebsitePlugin::new(data_path);
+        let website_plugin = Arc::new(JsonDataPlugin::new(website_inner_plugin));
         self.register_plugin(website_plugin)?;
         
-        // Register store plugins - use the vector returned from create_plugins
+        // Register store plugins
         let store_plugins = store::create_plugins(data_path)?;
         for plugin in store_plugins {
             self.register_plugin(plugin)?;
