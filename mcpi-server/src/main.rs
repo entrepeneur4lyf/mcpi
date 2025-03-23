@@ -14,7 +14,8 @@ use mcpi_common::{
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::time::Instant;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
@@ -23,6 +24,7 @@ use tracing::{error, info, warn};
 
 mod plugin_registry;
 mod plugins;
+mod admin;
 
 use plugin_registry::PluginRegistry;
 
@@ -50,12 +52,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     
     // Register all plugins
     registry.register_all_plugins(DATA_PATH, referrals.clone())?;
+    info!("Registered {} plugins", registry.get_all_plugins().len());
     
     // Create app state
     let app_state = Arc::new(AppState { 
         registry: registry.clone(),
         provider_info: provider_info.clone(),
         referrals: referrals.clone(),
+        active_connections: AtomicUsize::new(0),
+        request_count: AtomicUsize::new(0),
+        startup_time: Instant::now(),
     });
 
     // Set up server
@@ -110,6 +116,10 @@ fn create_app(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/mcpi", get(ws_handler))
         .route("/mcpi/discover", get(discovery_handler))
+        // Add admin routes
+        .route("/admin", get(admin::serve_admin_html))
+        .route("/api/admin/stats", get(admin::get_stats))
+        .route("/api/admin/plugins", get(admin::get_plugins))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -120,16 +130,22 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 // Handle WebSocket connection
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
     
+    // Increment connection counter
+    state.active_connections.fetch_add(1, Ordering::SeqCst);
+    
     // Process messages from the client
     while let Some(Ok(message)) = receiver.next().await {
         if let Message::Text(text) = message {
+            // Increment request counter
+            state.request_count.fetch_add(1, Ordering::SeqCst);
+            
             let response = process_mcp_message(&text, &state).await;
             
             if let Some(response_text) = response {
@@ -141,6 +157,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             }
         }
     }
+    
+    // Decrement connection counter on disconnect
+    state.active_connections.fetch_sub(1, Ordering::SeqCst);
     
     info!("WebSocket connection closed");
 }
@@ -178,6 +197,9 @@ async fn process_mcp_message(message: &str, state: &Arc<AppState>) -> Option<Str
 async fn discovery_handler(
     State(state): State<Arc<AppState>>,
 ) -> Json<DiscoveryResponse> {
+    // Increment request counter
+    state.request_count.fetch_add(1, Ordering::SeqCst);
+    
     // Extract provider name and domain
     let provider_name = state.provider_info.get("name")
         .and_then(|n| n.as_str())
@@ -539,8 +561,11 @@ fn create_error_response(id: Value, code: i32, message: String) -> String {
 }
 
 // Shared application state
-struct AppState {
+pub struct AppState {
     registry: Arc<PluginRegistry>,
     provider_info: Value,
     referrals: Value,
+    active_connections: AtomicUsize,
+    request_count: AtomicUsize,
+    startup_time: Instant,
 }
