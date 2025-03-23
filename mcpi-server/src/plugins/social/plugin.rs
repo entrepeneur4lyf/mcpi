@@ -56,7 +56,7 @@ impl McpPlugin for SocialPlugin {
     }
     
     fn supported_operations(&self) -> Vec<String> {
-        vec!["LIST_REFERRALS".to_string(), "GET_REFERRAL".to_string()]
+        vec!["LIST_REFERRALS".to_string(), "GET_REFERRAL".to_string(), "LIST".to_string()]
     }
     
     fn input_schema(&self) -> Value {
@@ -65,7 +65,7 @@ impl McpPlugin for SocialPlugin {
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["LIST_REFERRALS", "GET_REFERRAL"],
+                    "enum": ["LIST_REFERRALS", "GET_REFERRAL", "LIST"],
                     "description": "Operation to perform"
                 },
                 "domain": {
@@ -87,7 +87,7 @@ impl McpPlugin for SocialPlugin {
         
         // Delegate to operations module
         match operation {
-            "LIST_REFERRALS" => {
+            "LIST_REFERRALS" | "LIST" => {
                 let relationship = params.get("relationship").and_then(|r| r.as_str());
                 operations::list_referrals(&referrals, relationship)
             },
