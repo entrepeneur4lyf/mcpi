@@ -427,50 +427,44 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // Generate appropriate test parameters for a quick action
-  async function generateTestParams(tool, operation) {
-    // Default params object
-    const params = {};
+// Generate appropriate test parameters for a quick action
+async function generateTestParams(tool, operation) {
+  // Default params object
+  const params = {};
+  
+  // Different parameters based on tool and operation type
+  if (operation === "HELLO") {
+    params.context = "general";
+  }
+  else if (operation.includes("GET") || operation === "GET") {
+    // For GET operations, we need to find a real ID
+    // First determine which entity type we're working with
+    let listOp = "LIST";
+    let idField = "id";
     
-    // Different parameters based on tool and operation type
-    if (operation === "HELLO") {
-      params.context = "general";
+    if (tool.name === "store_product") {
+      listOp = "LIST_PRODUCTS";
+    } else if (tool.name === "store_customer") {
+      listOp = "LIST_CUSTOMERS";
+    } else if (tool.name === "store_order") {
+      listOp = "LIST_ORDERS";
+    } else if (tool.name === "store_review") {
+      listOp = "LIST_REVIEWS";
+    } else if (tool.name === "weather_forecast") {
+      // Special case for weather forecast - it needs a location parameter
+      params.location = "New York";
+      return params; // Return early with location parameter
     }
-    else if (operation.includes("GET") || operation === "GET") {
-      // For GET operations, we need to find a real ID
-      // First determine which entity type we're working with
-      let listOp = "LIST";
-      let idField = "id";
+    
+    // Fetch entity data if needed
+    try {
+      const entities = await getEntityData(tool.name, listOp);
       
-      if (tool.name === "store_product") {
-        listOp = "LIST_PRODUCTS";
-      } else if (tool.name === "store_customer") {
-        listOp = "LIST_CUSTOMERS";
-      } else if (tool.name === "store_order") {
-        listOp = "LIST_ORDERS";
-      } else if (tool.name === "store_review") {
-        listOp = "LIST_REVIEWS";
-      }
-      
-      // Fetch entity data if needed
-      try {
-        const entities = await getEntityData(tool.name, listOp);
-        
-        if (entities && entities.length > 0) {
-          // Get the first entity's ID
-          params.id = entities[0].id;
-        } else {
-          // Fallback to some default IDs if no entities found
-          if (tool.name === "store_product") params.id = "eco-1001";
-          else if (tool.name === "store_customer") params.id = "cust-1001";
-          else if (tool.name === "store_order") params.id = "order-5001";
-          else if (tool.name === "store_review") params.id = "rev-2001";
-          else if (tool.name === "website") params.id = "about";
-          else params.id = "sample-id";
-        }
-      } catch (error) {
-        console.error(`Error fetching data for ${tool.name}:`, error);
-        // Fallback to some default IDs
+      if (entities && entities.length > 0) {
+        // Get the first entity's ID
+        params.id = entities[0].id;
+      } else {
+        // Fallback to some default IDs if no entities found
         if (tool.name === "store_product") params.id = "eco-1001";
         else if (tool.name === "store_customer") params.id = "cust-1001";
         else if (tool.name === "store_order") params.id = "order-5001";
@@ -478,62 +472,62 @@ document.addEventListener('DOMContentLoaded', function() {
         else if (tool.name === "website") params.id = "about";
         else params.id = "sample-id";
       }
+    } catch (error) {
+      console.error(`Error fetching data for ${tool.name}:`, error);
+      // Fallback to some default IDs
+      if (tool.name === "store_product") params.id = "eco-1001";
+      else if (tool.name === "store_customer") params.id = "cust-1001";
+      else if (tool.name === "store_order") params.id = "order-5001";
+      else if (tool.name === "store_review") params.id = "rev-2001";
+      else if (tool.name === "website") params.id = "about";
+      else params.id = "sample-id";
     }
-    else if (operation.includes("SEARCH") || operation === "SEARCH") {
-      // For search operations, use reasonable defaults
-      params.query = "test";
-      
-      // Use appropriate field names based on the entity
-      if (tool.name === "store_product") params.field = "name";
-      else if (tool.name === "store_customer") params.field = "name";
-      else if (tool.name === "store_review") params.field = "content";
-      else if (tool.name === "website") params.field = "title";
-      else params.field = "name";
-    }
-    
-    return params;
   }
+  else if (operation.includes("SEARCH") || operation === "SEARCH") {
+    // For search operations, use reasonable defaults
+    params.query = "test";
+    
+    // Use appropriate field names based on the entity
+    if (tool.name === "store_product") params.field = "name";
+    else if (tool.name === "store_customer") params.field = "name";
+    else if (tool.name === "store_review") params.field = "content";
+    else if (tool.name === "website") params.field = "title";
+    else params.field = "name";
+  }
+  
+  return params;
+}
 
-  // Generate a meaningful label for a quick action
-  async function generateActionLabel(tool, operation, params) {
-    let label = operation;
-    
-    // Make labels more user-friendly
-    if (operation === "HELLO") {
-      return "Get site introduction";
-    }
-    else if (operation.includes("LIST") || operation === "LIST") {
-      return `List all ${operation.replace("LIST_", "").toLowerCase()}`;
-    }
-    else if (operation.includes("SEARCH") || operation === "SEARCH") {
-      return `Search ${operation.replace("SEARCH_", "").toLowerCase()}`;
-    }
-    else if (operation.includes("GET") || operation === "GET") {
-      // For GET operations, try to include the entity name
-      const id = params.id;
-      
-      // If we have entity data cached, use it to create a better label
-      const cacheKey = `${tool.name}_LIST`;
-      if (entityCache[cacheKey]) {
-        const entity = entityCache[cacheKey].find(e => e.id === id);
-        if (entity) {
-          const nameField = entity.name ? 'name' : (entity.title ? 'title' : 'id');
-          return `View ${operation.replace("GET_", "").toLowerCase()}: ${entity[nameField]}`;
-        }
-      }
-      
-      // Default labels if we don't have entity data
-      if (tool.name === "store_product") return `View product ${id}`;
-      else if (tool.name === "store_customer") return `View customer ${id}`;
-      else if (tool.name === "store_order") return `View order ${id}`;
-      else if (tool.name === "store_review") return `View review ${id}`;
-      else if (tool.name === "website" && id === "about") return "View About page";
-      else return `View ${id}`;
-    }
-    
-    // Default case
-    return `${operation} operation`;
+// Generate a meaningful label for a quick action
+async function generateActionLabel(tool, operation, params) {
+  let label = operation;
+  
+  // Make labels more user-friendly
+  if (operation === "HELLO") {
+    return "Get site introduction";
   }
+  else if (operation.includes("LIST") || operation === "LIST") {
+    return `List all ${operation.replace("LIST_", "").toLowerCase()}`;
+  }
+  else if (operation.includes("SEARCH") || operation === "SEARCH") {
+    return `Search ${operation.replace("SEARCH_", "").toLowerCase()}`;
+  }
+  else if (operation.includes("GET") || operation === "GET") {
+    // For GET operations, try to include the entity name
+    const id = params.id;
+    
+    // Default labels with prefix
+    if (tool.name === "store_product") return `View product: ${id}`;
+    else if (tool.name === "store_customer") return `View customer: ${id}`;
+    else if (tool.name === "store_order") return `View order: ${id}`;
+    else if (tool.name === "store_review") return `View review: ${id}`;
+    else if (tool.name === "website" && id === "about") return `View page: About`;
+    else return `View item: ${id}`;
+  }
+  
+  // Default case
+  return `${operation}`;
+}
 
 // Create dynamic quick actions for a tool
 async function createDynamicQuickActions(tool) {
@@ -554,8 +548,6 @@ async function createDynamicQuickActions(tool) {
     return 'LIST';
   }
   
-  // Display operations more logically by operation type
-  
   // 1. LIST operations (always first and simplest)
   const listOps = operations.filter(op => op.includes('LIST') || op === 'LIST');
   for (const operation of listOps) {
@@ -563,7 +555,7 @@ async function createDynamicQuickActions(tool) {
     const mappedOperation = operation === 'LIST' ? mapListOperation(tool.name) : operation;
     
     quickActions.push({ 
-      operation: mappedOperation,  // Use the correct operation for the tool
+      operation: mappedOperation,
       label: `List all ${operation.replace("LIST_", "").toLowerCase()}`, 
       params: {},
       type: "discovery" // Mark as a discovery operation 
@@ -602,7 +594,7 @@ async function createDynamicQuickActions(tool) {
     
     quickActions.push({ 
       operation, 
-      label: `Test: ${label}`, // Prefix with "Test:" to clearly mark it
+      label: `${label}`, // Make label clearer
       params,
       type: "test" // Mark as a test operation
     });
@@ -674,6 +666,9 @@ async function createDynamicQuickActions(tool) {
         apiSection.className = 'action-section';
         apiSection.innerHTML = '<h4>API Operations</h4>';
         
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.className = 'buttons-wrapper';
+        
         discoveryActions.forEach(action => {
           const button = document.createElement('button');
           button.className = 'quick-action-btn';
@@ -697,9 +692,10 @@ async function createDynamicQuickActions(tool) {
             }
           });
           
-          apiSection.appendChild(button);
+          buttonsContainer.appendChild(button);
         });
         
+        apiSection.appendChild(buttonsContainer);
         quickActionsContainer.appendChild(apiSection);
       }
       
@@ -710,6 +706,9 @@ async function createDynamicQuickActions(tool) {
         testSection.className = 'action-section test-actions';
         testSection.innerHTML = '<h4>Test Operations</h4>';
         
+        const buttonsContainer = document.createElement('div');
+        buttonsContainer.className = 'buttons-wrapper';
+        
         testActions.forEach(action => {
           const button = document.createElement('button');
           button.className = 'quick-action-btn test-btn';
@@ -717,6 +716,7 @@ async function createDynamicQuickActions(tool) {
           button.setAttribute('data-operation', action.operation);
           button.setAttribute('data-params', JSON.stringify(action.params));
           button.textContent = action.label;
+          button.title = action.label; // Add title for hover text on overflow
           
           // Add click handler
           button.addEventListener('click', function(e) {
@@ -733,9 +733,10 @@ async function createDynamicQuickActions(tool) {
             }
           });
           
-          testSection.appendChild(button);
+          buttonsContainer.appendChild(button);
         });
         
+        testSection.appendChild(buttonsContainer);
         quickActionsContainer.appendChild(testSection);
       }
       
