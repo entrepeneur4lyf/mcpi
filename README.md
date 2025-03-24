@@ -65,7 +65,7 @@ You can easily extend MCPI by creating your own plugins. Each plugin implements 
 
 ## Prerequisites
 
-- Rust and Cargo (2021 edition or newer)
+- Rust and Cargo (2024 edition or newer)
 - Internet connection for dependencies
 - Dig command-line tool (for DNS discovery)
 - Google Chrome (for the Chrome extension)

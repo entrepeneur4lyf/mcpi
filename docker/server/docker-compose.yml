@@ -1,0 +1,13 @@
+services:
+  mcpi-server:
+    build:
+      context: ../..
+      dockerfile: docker/server/Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ../../data:/app/data
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    restart: unless-stopped

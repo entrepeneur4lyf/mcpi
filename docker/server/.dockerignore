@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+target/
+debug/
+**/target/
+
+# Development files
+*.log
+.env
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.swp
+*~
+
+# Rust-specific
+**/*.rs.bk
+
+# Dependency directories
+node_modules/
+
+# Temporary files
+tmp/
+temp/
