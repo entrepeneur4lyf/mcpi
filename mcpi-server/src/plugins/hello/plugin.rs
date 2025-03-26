@@ -17,7 +17,7 @@ impl HelloPlugin {
         HelloPlugin {
             name: "hello".to_string(),
             description: "AI agent introduction protocol".to_string(),
-            data_path: format!("{}/hello/config/data.json", data_base_path),
+            data_path: format!("{}/hello/config.json", data_base_path),
         }
     }
 
