@@ -31,7 +31,7 @@ mod plugins;
 use plugin_registry::PluginRegistry;
 
 // Define paths as constants
-const CONFIG_FILE_PATH: &str = "data/config/server.json";
+const CONFIG_FILE_PATH: &str = "data/server/config.json";
 const DATA_PATH: &str = "data";
 
 #[tokio::main]
