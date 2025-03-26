@@ -1,0 +1,37 @@
+{
+    "provider": {
+      "name": "Mock/Example Store",
+      "domain": "mcpintegrate.com",
+      "description": "Online retailer of eco-friendly products",
+      "branding": {
+        "colors": {
+          "primary": "#3498db",
+          "secondary": "#2ecc71"
+        },
+        "logo": {
+          "vector": "https://example.com/logo.svg"
+        },
+        "typography": {
+          "primary": "Helvetica Neue"
+        },
+        "tone": "professional"
+      }
+    },
+    "referrals": [
+      {
+        "name": "Eco Shipping",
+        "domain": "ecoshipping.com",
+        "relationship": "trusted"
+      },
+      {
+        "name": "Green Packaging",
+        "domain": "greenpack.co",
+        "relationship": "partner"
+      },
+      {
+        "name": "Sustainability Certification",
+        "domain": "eco-cert.org",
+        "relationship": "verified"
+      }
+    ]
+  }
