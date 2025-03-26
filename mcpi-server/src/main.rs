@@ -1,12 +1,10 @@
 // mcpi-server/src/main.rs
-use axum::extract::ws::{Message, WebSocket};
 use axum::{
     extract::{State, WebSocketUpgrade},
-    response::IntoResponse,
     routing::get,
     Json, Router,
 };
-use futures::{sink::SinkExt, stream::StreamExt};
+use futures::{SinkExt, StreamExt};
 use mcpi_common::{
     CapabilityDescription, DiscoveryResponse, MCPRequest, Resource, Tool, MCPI_VERSION,
 };
@@ -20,20 +18,24 @@ use std::sync::{
 use std::time::Instant;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
+use uuid::Uuid;
 
 use std::fs;
 use tracing::{error, info, warn};
 
 mod admin;
+mod message_handler;
 mod plugin_registry;
 mod plugins;
+mod transport;
 
+use message_handler::McpMessageHandler;
 use plugin_registry::PluginRegistry;
+use transport::traits::MessageHandler; // Add this import
 
 // Define paths as constants
 const DATA_PATH: &str = "data";
 const CONFIG_FILE_PATH: &str = "data/server/data.json";
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -41,10 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
 
     // Validate paths
-    validate_data_file_paths()?;
+    validate_paths()?;
 
     // Load configuration
-    let config = load_server_data()?;
+    let config = load_config()?;
 
     // Extract provider info and referrals
     let provider_info = config.get("provider").cloned().unwrap_or_else(|| json!({}));
@@ -70,23 +72,85 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         startup_time: Instant::now(),
     });
 
-    // Set up server
-    let app = create_app(app_state);
+    // Build CORS layer
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
-    // Run the server
+    // Create message handler for WebSocket
+    let message_handler = Arc::new(McpMessageHandler::new(app_state.clone()));
+
+    // Create HTTP router for admin and discovery endpoints
+    let app = Router::new()
+        .route("/mcpi/discover", get(discovery_handler))
+        .route("/admin", get(admin::serve_admin_html))
+        .route("/api/admin/stats", get(admin::get_stats))
+        .route("/api/admin/plugins", get(admin::get_plugins))
+        .with_state(app_state.clone());
+    
+    // Create WebSocket route
+    let ws_route = Router::new()
+        .route("/mcpi", get({
+            let handler = message_handler.clone();
+            move |ws: WebSocketUpgrade| {
+                let handler = handler.clone();
+                async move {
+                    ws.on_upgrade(|socket| handle_websocket(socket, handler))
+                }
+            }
+        }));
+    
+    // Combine the routers
+    let combined_app = app
+        .merge(ws_route)
+        .layer(TraceLayer::new_for_http())
+        .layer(cors);
+
+    // Set up server address
     let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
-    info!("MCPI server listening on {}", addr);
+    info!("Starting MCPI server on {}", addr);
 
+    // Start the server with graceful shutdown
     axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+        .serve(combined_app.into_make_service())
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.ok();
+            info!("Shutdown signal received");
+        })
+        .await?;
 
+    info!("MCPI server shut down successfully");
+    
     Ok(())
 }
 
+// Handle WebSocket connections
+async fn handle_websocket(socket: axum::extract::ws::WebSocket, message_handler: Arc<McpMessageHandler>) {
+    let (mut sender, mut receiver) = socket.split();
+    
+    // Generate client ID
+    let client_id = Uuid::new_v4().to_string();
+    info!("WebSocket connection established: {}", client_id);
+    
+    // Process messages
+    while let Some(Ok(message)) = receiver.next().await {
+        if let axum::extract::ws::Message::Text(text) = message {
+            // Use the future returned by handle_message
+            if let Some(response) = message_handler.handle_message(text, client_id.clone()).await {
+                if let Err(e) = sender.send(axum::extract::ws::Message::Text(response)).await {
+                    error!("Error sending message: {}", e);
+                    break;
+                }
+            }
+        }
+    }
+    
+    info!("WebSocket connection closed: {}", client_id);
+}
+
 // Validate that necessary paths exist
-fn validate_data_file_paths() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn validate_paths() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config_file = Path::new(CONFIG_FILE_PATH);
     let data_dir = Path::new(DATA_PATH);
 
@@ -104,94 +168,10 @@ fn validate_data_file_paths() -> Result<(), Box<dyn std::error::Error + Send + S
 }
 
 // Load configuration from file
-fn load_server_data() -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    let sever_data = fs::read_to_string(CONFIG_FILE_PATH)?;
-    let data: Value = serde_json::from_str(&sever_data)?;
-    Ok(data)
-}
-
-// Create the app with routes
-fn create_app(state: Arc<AppState>) -> Router {
-    // Build CORS layer
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    // Build application with routes
-    Router::new()
-        .route("/mcpi", get(ws_handler))
-        .route("/mcpi/discover", get(discovery_handler))
-        // Add admin routes
-        .route("/admin", get(admin::serve_admin_html))
-        .route("/api/admin/stats", get(admin::get_stats))
-        .route("/api/admin/plugins", get(admin::get_plugins))
-        .with_state(state)
-        .layer(TraceLayer::new_for_http())
-        .layer(cors)
-}
-
-// Handle WebSocket connections for MCP protocol
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
-}
-
-// Handle WebSocket connection
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
-    let (mut sender, mut receiver) = socket.split();
-
-    // Increment connection counter
-    state.active_connections.fetch_add(1, Ordering::SeqCst);
-
-    // Process messages from the client
-    while let Some(Ok(message)) = receiver.next().await {
-        if let Message::Text(text) = message {
-            // Increment request counter
-            state.request_count.fetch_add(1, Ordering::SeqCst);
-
-            let response = process_mcp_message(&text, &state).await;
-
-            if let Some(response_text) = response {
-                // Send the response back to the client
-                if let Err(e) = sender.send(Message::Text(response_text)).await {
-                    error!("Error sending message: {}", e);
-                    break;
-                }
-            }
-        }
-    }
-
-    // Decrement connection counter on disconnect
-    state.active_connections.fetch_sub(1, Ordering::SeqCst);
-
-    info!("WebSocket connection closed");
-}
-
-// Process an MCP message
-async fn process_mcp_message(message: &str, state: &Arc<AppState>) -> Option<String> {
-    // Parse the message
-    let request: Result<MCPRequest, _> = serde_json::from_str(message);
-
-    match request {
-        Ok(request) => match request.method.as_str() {
-            "initialize" => Some(handle_initialize(&request, state)),
-            "resources/list" => Some(handle_list_resources(&request, state)),
-            "resources/read" => Some(handle_read_resource(&request, state)),
-            "tools/list" => Some(handle_list_tools(&request, state)),
-            "tools/call" => Some(handle_call_tool(&request, state)),
-            "ping" => Some(handle_ping(&request)),
-            _ => Some(create_error_response(
-                request.id,
-                -32601,
-                format!("Method not found: {}", request.method),
-            )),
-        },
-        Err(e) => Some(create_error_response(
-            Value::Null,
-            -32700,
-            format!("Parse error: {}", e),
-        )),
-    }
+fn load_config() -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let config_data = fs::read_to_string(CONFIG_FILE_PATH)?;
+    let config: Value = serde_json::from_str(&config_data)?;
+    Ok(config)
 }
 
 // REST discovery endpoint
@@ -271,6 +251,33 @@ async fn discovery_handler(State(state): State<Arc<AppState>>) -> Json<Discovery
     };
 
     Json(response)
+}
+
+// Process an MCP message
+pub async fn process_mcp_message(message: &str, state: &Arc<AppState>) -> Option<String> {
+    // Parse the message
+    let request: Result<MCPRequest, _> = serde_json::from_str(message);
+
+    match request {
+        Ok(request) => match request.method.as_str() {
+            "initialize" => Some(handle_initialize(&request, state)),
+            "resources/list" => Some(handle_list_resources(&request, state)),
+            "resources/read" => Some(handle_read_resource(&request, state)),
+            "tools/list" => Some(handle_list_tools(&request, state)),
+            "tools/call" => Some(handle_call_tool(&request, state)),
+            "ping" => Some(handle_ping(&request)),
+            _ => Some(create_error_response(
+                request.id,
+                -32601,
+                format!("Method not found: {}", request.method),
+            )),
+        },
+        Err(e) => Some(create_error_response(
+            Value::Null,
+            -32700,
+            format!("Parse error: {}", e),
+        )),
+    }
 }
 
 // Handle MCP initialize request
@@ -459,7 +466,7 @@ fn handle_list_tools(request: &MCPRequest, state: &Arc<AppState>) -> String {
             input_schema: plugin.input_schema(),
         })
         .collect();
-
+ 
     let response = json!({
         "jsonrpc": "2.0",
         "id": request.id,
@@ -467,27 +474,27 @@ fn handle_list_tools(request: &MCPRequest, state: &Arc<AppState>) -> String {
             "tools": tools
         }
     });
-
+ 
     response.to_string()
-}
-
-// Handle MCP tools/call request
-fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
+ }
+ 
+ // Handle MCP tools/call request
+ fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
     info!("Handling tools/call request");
-
+ 
     if let Some(params) = &request.params {
         if let Some(tool_name) = params.get("name").and_then(|n| n.as_str()) {
             info!("Calling tool: {}", tool_name);
-
+ 
             if let Some(arguments) = params.get("arguments").and_then(|a| a.as_object()) {
                 // Extract operation
                 let operation = arguments
                     .get("operation")
                     .and_then(|o| o.as_str())
                     .unwrap_or("SEARCH");
-
+ 
                 info!("Operation: {}", operation);
-
+ 
                 // Execute the plugin operation
                 match state
                     .registry
@@ -507,7 +514,7 @@ fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
                                 ]
                             }
                         });
-
+ 
                         return response.to_string();
                     }
                     Err(e) => {
@@ -525,7 +532,7 @@ fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
                                 "isError": true
                             }
                         });
-
+ 
                         return response.to_string();
                     }
                 }
@@ -553,21 +560,21 @@ fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
             "Invalid params for tools/call".to_string(),
         );
     }
-}
-
-// Handle MCP ping request
-fn handle_ping(request: &MCPRequest) -> String {
+ }
+ 
+ // Handle MCP ping request
+ fn handle_ping(request: &MCPRequest) -> String {
     let response = json!({
         "jsonrpc": "2.0",
         "id": request.id,
         "result": {}
     });
-
+ 
     response.to_string()
-}
-
-// Create an error response
-fn create_error_response(id: Value, code: i32, message: String) -> String {
+ }
+ 
+ // Create an error response
+ fn create_error_response(id: Value, code: i32, message: String) -> String {
     let response = json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -576,16 +583,16 @@ fn create_error_response(id: Value, code: i32, message: String) -> String {
             "message": message
         }
     });
-
+ 
     response.to_string()
-}
-
-// Shared application state
-pub struct AppState {
+ }
+ 
+ // Shared application state
+ pub struct AppState {
     registry: Arc<PluginRegistry>,
     provider_info: Value,
     referrals: Value,
     active_connections: AtomicUsize,
     request_count: AtomicUsize,
     startup_time: Instant,
-}
+ }
