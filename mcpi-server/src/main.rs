@@ -41,10 +41,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
 
     // Validate paths
-    validate_paths()?;
+    validate_data_file_paths()?;
 
     // Load configuration
-    let config = load_config()?;
+    let config = load_server_data()?;
 
     // Extract provider info and referrals
     let provider_info = config.get("provider").cloned().unwrap_or_else(|| json!({}));
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 // Validate that necessary paths exist
-fn validate_paths() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn validate_data_file_paths() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config_file = Path::new(CONFIG_FILE_PATH);
     let data_dir = Path::new(DATA_PATH);
 
@@ -104,10 +104,10 @@ fn validate_paths() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 // Load configuration from file
-fn load_config() -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    let config_data = fs::read_to_string(CONFIG_FILE_PATH)?;
-    let config: Value = serde_json::from_str(&config_data)?;
-    Ok(config)
+fn load_server_data() -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+    let sever_data = fs::read_to_string(CONFIG_FILE_PATH)?;
+    let data: Value = serde_json::from_str(&sever_data)?;
+    Ok(data)
 }
 
 // Create the app with routes
