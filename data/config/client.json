@@ -1,0 +1,21 @@
+{
+    "client": {
+        "name": "MCPI Reference Client",
+        "version": "0.1.0",
+        "description": "Official Model Context Protocol Integration Reference Client"
+    },
+    "protocol": {
+        "supported_versions": ["mcp1"]
+    },
+    "connection": {
+        "default_timeout": 10,
+        "retry_attempts": 3,
+        "reconnect_delay": 2
+    },
+    "discovery": {
+        "default_domains": [
+            "mcpintegrate.com"
+        ],
+        "dns_discovery": true
+    }
+}
