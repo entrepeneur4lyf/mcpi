@@ -31,8 +31,9 @@ mod plugins;
 use plugin_registry::PluginRegistry;
 
 // Define paths as constants
-const CONFIG_FILE_PATH: &str = "data/server/data.json";
 const DATA_PATH: &str = "data";
+const CONFIG_FILE_PATH: &str = "data/server/data.json";
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

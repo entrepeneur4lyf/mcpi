@@ -2,7 +2,6 @@
 use crate::json_plugin::{JsonDataCapable, JsonDataPlugin};
 use crate::McpPlugin;
 use std::sync::Arc;
-use std::path::Path;
 
 // Define a basic JsonData implementation that can be used by the factory
 struct BasicJsonData {
