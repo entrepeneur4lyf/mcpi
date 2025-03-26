@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     
     // Send and handle errors in a simpler way
-    write.send(Message::Text(serde_json::to_string(&init_request)?)).await
+    write.send(Message::Text(serde_json::to_string(&init_request)?.into())).await
         .map_err(|_| "WebSocket send error")?;
     
     if let Some(Ok(Message::Text(response))) = read.next().await {
@@ -174,7 +174,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         params: Some(json!({})),
     };
     
-    write.send(Message::Text(serde_json::to_string(&list_resources_request)?)).await
+    write.send(Message::Text(serde_json::to_string(&list_resources_request)?.into())).await
         .map_err(|_| "WebSocket send error")?;
     
     if let Some(Ok(Message::Text(response))) = read.next().await {
@@ -203,7 +203,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         params: Some(json!({})),
     };
     
-    write.send(Message::Text(serde_json::to_string(&list_tools_request)?)).await
+    write.send(Message::Text(serde_json::to_string(&list_tools_request)?.into())).await
         .map_err(|_| "WebSocket send error")?;
     
     let mut tools = Vec::new();
@@ -301,7 +301,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         params: None,
     };
     
-    write.send(Message::Text(serde_json::to_string(&ping_request)?)).await
+    write.send(Message::Text(serde_json::to_string(&ping_request)?.into())).await
         .map_err(|_| "WebSocket send error")?;
     
     if let Some(Ok(Message::Text(response))) = read.next().await {
@@ -477,7 +477,7 @@ where
     
     println!("Request: {}", serde_json::to_string_pretty(&request.params).unwrap_or_default());
     
-    write.send(Message::Text(serde_json::to_string(&request)?)).await
+    write.send(Message::Text(serde_json::to_string(&request)?.into())).await
         .map_err(|_| "WebSocket send error")?;
     
     if let Some(Ok(Message::Text(response))) = read.next().await {
