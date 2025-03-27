@@ -1,6 +1,6 @@
 // mcpi-server/src/plugins/weather/operations.rs
 use mcpi_common::PluginResult;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::info;
 
 /// Generate a random forecast for a given location

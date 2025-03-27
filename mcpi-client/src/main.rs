@@ -1,98 +1,80 @@
 // mcpi-client/src/main.rs
 use futures::{SinkExt, StreamExt};
 use mcpi_common::{
-    DiscoveryResponse, InitializeResult, MCPRequest, MCPResponse, ToolCallResult,
-    MCPI_VERSION, // Import MCPI_VERSION
-    ContentItem, // Needed for call_tool result parsing
-    // Removed unused imports
+    DiscoveryResponse, InitializeResult, MCPRequest, MCPResponse,
+    CallToolResult, // <<< FIX: Correct struct name
+    MCPI_VERSION,
+    ContentItem,
+    ResourceContentUnion,
+    // Add Provider, Referral, CapabilityDescription if needed by discovery handler logic here
+    Provider, Referral, CapabilityDescription, // Needed for discovery output display
 };
 use serde_json::{json, Value};
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use std::error::Error;
 use clap::{Parser, Subcommand};
-use reqwest; // Import reqwest
-use rand::Rng; // Import Rng trait
+use reqwest;
+use rand::Rng;
 
 mod discovery;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// Domain to discover MCPI services from (uses DNS TXT records)
     #[arg(short, long)]
     domain: Option<String>,
-
-    /// Direct base URL to server (e.g., http://localhost:3001), paths will be added
     #[arg(short, long)]
     base_url: Option<String>,
-
-    /// Test a specific plugin only
     #[arg(short, long)]
     plugin: Option<String>,
-
-    #[command(subcommand)]
-    command: Option<Commands>,
+    // #[command(subcommand)]
+    // command: Option<Commands>,
 }
 
+// Subcommand not currently used
 #[derive(Subcommand)]
 enum Commands {
-    /// Discover MCPI services for a domain
     Discover { domain: String },
-    // Removed Connect subcommand as we now derive URLs
 }
 
-// Define a consistent error type
 type BoxedError = Box<dyn Error + Send + Sync>;
 
 #[tokio::main]
 async fn main() -> Result<(), BoxedError> {
     let cli = Cli::parse();
 
-    // Determine discovery and WebSocket URLs
     let (discovery_url, ws_url) = if let Some(domain) = cli.domain {
         println!("Performing DNS-based discovery for domain: {}", domain);
         match discovery::discover_mcp_services(&domain).await {
             Ok(service_info) => {
                 println!("Discovered MCP service:");
                 println!("  Version: {}", service_info.version);
-                println!("  Endpoint: {}", service_info.endpoint); // Discovery endpoint
+                println!("  Endpoint: {}", service_info.endpoint);
                 let discovery_ep = service_info.endpoint;
                 let base = discovery_ep.replace("/mcpi/discover", "");
-                let ws_derived = if base.starts_with("https://") {
-                    base.replace("https://", "wss://") + "/mcpi" // Use /mcpi for WS
-                } else {
-                    base.replace("http://", "ws://") + "/mcpi" // Use /mcpi for WS
-                };
+                let ws_derived = if base.starts_with("https://") { base.replace("https://", "wss://") + "/mcpi" } else { base.replace("http://", "ws://") + "/mcpi" };
                 println!("Derived WebSocket URL: {}", ws_derived);
                 (discovery_ep, ws_derived)
             },
-            Err(e) => {
-                println!("DNS discovery failed: {}.", e);
-                return Err(format!("DNS discovery failed for domain '{}': {}", domain, e).into());
-            }
+            Err(e) => { println!("DNS discovery failed: {}.", e); return Err(format!("DNS discovery failed: {}", e).into()); }
         }
     } else if let Some(base_url) = cli.base_url {
         let base = base_url.trim_end_matches('/');
         let discovery = format!("{}/mcpi/discover", base);
-        let websocket = if base.starts_with("https://") {
-            format!("wss://{}/mcpi", base.trim_start_matches("https://")) // Use /mcpi for WS
-        } else {
-            format!("ws://{}/mcpi", base.trim_start_matches("http://")) // Use /mcpi for WS
-        };
+        let websocket = if base.starts_with("https://") { format!("wss://{}/mcpi", base.trim_start_matches("https://")) } else { format!("ws://{}/mcpi", base.trim_start_matches("http://")) };
         println!("Using provided base URL: {}", base_url);
         println!("Derived Discovery URL: {}", discovery);
         println!("Derived WebSocket URL: {}", websocket);
         (discovery, websocket)
     } else {
         let discovery = String::from("http://localhost:3001/mcpi/discover");
-        let websocket = String::from("ws://localhost:3001/mcpi"); // Default WS path /mcpi
-        println!("No domain or base URL provided. Using default localhost URLs:");
+        let websocket = String::from("ws://localhost:3001/mcpi");
+        println!("Using default localhost URLs:");
         println!("Discovery: {}", discovery);
         println!("WebSocket: {}", websocket);
         (discovery, websocket)
     };
 
-    // --- HTTP Discovery ---
     println!("\nDiscovering service capabilities via HTTP...");
     let discovery_resp = discover_service_http(&discovery_url).await?;
     println!("Connected to Provider: {} ({})", discovery_resp.provider.name, discovery_resp.provider.domain);
@@ -102,21 +84,15 @@ async fn main() -> Result<(), BoxedError> {
     println!("\nReferrals (from discovery):");
     for ref_info in &discovery_resp.referrals { println!("  - {}: {}", ref_info.name, ref_info.domain); }
 
-    // --- WebSocket Connection (MCPI) ---
     println!("\nConnecting via WebSocket (MCPI)...");
     println!("Connecting to: {}", ws_url);
     let (ws_stream, _) = connect_async(&ws_url).await.map_err(|e| format!("WS connection failed: {}", e))?;
     println!("WebSocket connection established.");
     let (mut write, mut read) = ws_stream.split();
 
-    // --- Initialize (MCPI) ---
     let init_request = MCPRequest {
         jsonrpc: "2.0".to_string(), id: json!(1), method: "initialize".to_string(),
-        params: Some(json!({
-            "clientInfo": { "name": "MCPI Test Client", "version": "0.1.0" },
-            "protocolVersion": mcpi_common::MCPI_VERSION, // Correct version for MCPI/WS
-            "capabilities": { /* Client caps */ }
-        })),
+        params: Some(json!({ "clientInfo": { "name": "MCPI Test Client", "version": "0.1.0" }, "protocolVersion": mcpi_common::MCPI_VERSION, "capabilities": { /* Client caps */ } })),
     };
     let init_req_str = serde_json::to_string(&init_request).map_err(|e| format!("Serialize init err: {}", e))?;
     write.send(Message::Text(init_req_str.into())).await.map_err(|e| format!("WS send err (init): {}", e))?;
@@ -126,12 +102,11 @@ async fn main() -> Result<(), BoxedError> {
         if let Some(err) = parsed.error { println!("Init error: {} ({})", err.message, err.code); return Err("Init failed".into()); }
         if let Some(res) = parsed.result {
             let init_res: InitializeResult = serde_json::from_value(res).map_err(|e| format!("Parse init result err: {}", e))?;
-            println!("\nMCPI connection initialized: Server: {} v{}, Protocol: v{}", init_res.server_info.name, init_res.server_info.version, init_res.protocol_version);
+            println!("\nMCPI initialized: Server: {} v{}, Proto: v{}", init_res.server_info.name, init_res.server_info.version, init_res.protocol_version);
             if let Some(inst) = init_res.instructions { println!("  Instructions: {}", inst); }
         } else { return Err("Invalid init response".into()); }
     } else { return Err("No init response".into()); }
 
-    // --- List Resources (MCPI) ---
     let list_res_req = MCPRequest { jsonrpc: "2.0".to_string(), id: json!(2), method: "resources/list".to_string(), params: None };
     let list_res_str = serde_json::to_string(&list_res_req).map_err(|e| format!("Serialize list res err: {}", e))?;
     write.send(Message::Text(list_res_str.into())).await.map_err(|e| format!("WS send err (list res): {}", e))?;
@@ -143,7 +118,6 @@ async fn main() -> Result<(), BoxedError> {
         else { println!("Warn: Invalid list res resp"); }
     } else { println!("Warn: No list res resp"); }
 
-    // --- List Tools (MCPI) ---
     let list_tools_req = MCPRequest { jsonrpc: "2.0".to_string(), id: json!(3), method: "tools/list".to_string(), params: None };
     let list_tools_str = serde_json::to_string(&list_tools_req).map_err(|e| format!("Serialize list tools err: {}", e))?;
     write.send(Message::Text(list_tools_str.into())).await.map_err(|e| format!("WS send err (list tools): {}", e))?;
@@ -156,17 +130,14 @@ async fn main() -> Result<(), BoxedError> {
         else{println!("Warn: Invalid list tools resp");}
     } else {println!("Warn: No list tools resp");}
 
-    // --- Select Tools to Test ---
     let tools_to_test = if let Some(p_name)=cli.plugin{if tools.contains(&p_name){vec![p_name]}else{println!("\nTool '{}' unavailable. Available: {}",p_name,tools.join(", "));return Err("Tool not found".into());}}else{tools};
 
-    // --- Test Batch (MCPI) ---
     println!("\nTesting JSON-RPC batch request...");
     let batch_req_data = json!([{ "jsonrpc": "2.0", "id": 10, "method": "ping", "params": null }, { "jsonrpc": "2.0", "id": 11, "method": "resources/list", "params": null }]);
     let batch_req_str = serde_json::to_string(&batch_req_data).map_err(|e| format!("Serialize batch err: {}", e))?;
     write.send(Message::Text(batch_req_str.into())).await.map_err(|e| format!("WS send err (batch): {}", e))?;
     if let Some(Ok(Message::Text(resp_str))) = read.next().await { if resp_str.trim().starts_with('[') { match serde_json::from_str::<Vec<MCPResponse>>(&resp_str) { Ok(br) => { println!("Batch response ({} items):", br.len()); for (i, r) in br.iter().enumerate() { println!("  Item {}: ID={}", i+1, r.id); if let Some(err)=&r.error{println!("    Err: {} ({})", err.message, err.code);} } } Err(e) => println!("Err parsing batch resp: {}", e), }} else { println!("Warn: Expected batch array, got: {}", resp_str); } } else { println!("Warn: No batch resp"); }
 
-    // --- Test Tools (MCPI) ---
     for tool_name in tools_to_test {
         println!("\n=== Testing tool: {} ===", tool_name);
         let tool_info = tools_info.iter().find(|t|t.get("name").and_then(|n|n.as_str())==Some(&tool_name)).cloned().unwrap_or_default();
@@ -191,7 +162,6 @@ async fn main() -> Result<(), BoxedError> {
         }
     }
 
-    // --- Ping (MCPI) ---
     let ping_req = MCPRequest { jsonrpc: "2.0".to_string(), id: json!(99), method: "ping".to_string(), params: None };
     let ping_req_str = serde_json::to_string(&ping_req).map_err(|e| format!("Serialize ping err: {}", e))?;
     write.send(Message::Text(ping_req_str.into())).await.map_err(|e| format!("WS send err (ping): {}", e))?;
@@ -226,5 +196,20 @@ async fn call_tool<S, R>( write: &mut S, read: &mut R, name: &str, operation: &s
     println!("Request Params: {}", serde_json::to_string_pretty(req.params.as_ref().unwrap()).unwrap_or_default());
     let req_str=serde_json::to_string(&req).map_err(|e|format!("Serialize tool call err: {}",e))?;
     write.send(Message::Text(req_str.into())).await.map_err(|e|format!("WS send err (tool call): {}",e))?;
-    if let Some(Ok(Message::Text(resp_str)))=read.next().await{match serde_json::from_str::<MCPResponse>(&resp_str){Ok(p)=>{if let Some(e)=p.error{println!("  Tool call error: {} ({})",e.message,e.code);}else if let Some(r)=p.result{match serde_json::from_value::<ToolCallResult>(r.clone()){Ok(tr)=>{println!("  Result{}",if tr.is_error{" (ERROR)"}else{""});for c in tr.content{match c{mcpi_common::ContentItem::Text{text}=>{if let Ok(j)=serde_json::from_str::<Value>(&text){println!("  {}",serde_json::to_string_pretty(&j).unwrap_or(text));}else{println!("  {}",text);}},mcpi_common::ContentItem::Audio{data,mime_type}=>println!("  Audio: {}b, {}",data.len(),mime_type),mcpi_common::ContentItem::Image{data,mime_type}=>println!("  Image: {}b, {}",data.len(),mime_type),mcpi_common::ContentItem::Resource{resource}=>println!("  Resource: {}",resource.uri),}}}Err(e)=>println!("  Err parsing ToolCallResult: {}\nRaw: {}",e,serde_json::to_string_pretty(&r).unwrap_or_default()),}}else{println!("  Invalid tool call response");}}Err(e)=>println!("Err parsing tool call resp: {}",e),}}else{println!("Warn: No tool call resp");} Ok(())
+    if let Some(Ok(Message::Text(resp_str)))=read.next().await{match serde_json::from_str::<MCPResponse>(&resp_str){Ok(p)=>{if let Some(e)=p.error{println!("  Tool call error: {} ({})",e.message,e.code);}else if let Some(r)=p.result{
+        // FIX: Use correct struct name CallToolResult here
+        match serde_json::from_value::<CallToolResult>(r.clone()){
+            Ok(tr)=>{println!("  Result{}",if tr.is_error{" (ERROR)"}else{""});for c in tr.content{match c{
+                // FIX: Add .. to ignore annotations field in patterns
+                ContentItem::Text{text, ..}=>{if let Ok(j)=serde_json::from_str::<Value>(&text){println!("  {}",serde_json::to_string_pretty(&j).unwrap_or(text));}else{println!("  {}",text);}},
+                ContentItem::Audio{data,mime_type, ..}=>println!("  Audio: {}b, {}",data.len(),mime_type),
+                ContentItem::Image{data,mime_type, ..}=>println!("  Image: {}b, {}",data.len(),mime_type),
+                ContentItem::Resource{resource, ..}=>{ // FIX: Match inner ResourceContentUnion
+                    match resource {
+                        ResourceContentUnion::Text(tc) => println!("  Resource (Text): {}", tc.uri),
+                        ResourceContentUnion::Blob(bc) => println!("  Resource (Blob): {}", bc.uri),
+                    }
+                },
+            }}}Err(e)=>println!("  Err parsing ToolCallResult: {}\nRaw: {}",e,serde_json::to_string_pretty(&r).unwrap_or_default()),
+        }}else{println!("  Invalid tool call response");}}Err(e)=>println!("Err parsing tool call resp: {}",e),}}else{println!("Warn: No tool call resp");} Ok(())
 }

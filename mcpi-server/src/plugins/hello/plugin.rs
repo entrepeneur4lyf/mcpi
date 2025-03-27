@@ -4,7 +4,7 @@ use crate::plugins::hello::operations;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::fs;
-use tracing::{info, error};
+use tracing::info;
 
 pub struct HelloPlugin {
     name: String,

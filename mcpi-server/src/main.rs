@@ -4,15 +4,16 @@
 use axum::{
     extract::{ws::{WebSocket, WebSocketUpgrade, Message}, State},
     response::{IntoResponse, Response},
-    routing::{get, post, delete}, // Keep post/delete for /mcpi route
+    routing::get,
     Router, Json,
-    // Removed BoxError
     http::{StatusCode, HeaderMap},
 };
 use mcpi_common::{ // Group common imports
     CapabilityDescription, DiscoveryResponse, MCPRequest, Resource, Tool,
     ServerCapabilities, MCPI_VERSION, ContentItem, ResourcesCapability, ToolsCapability,
-    Provider, Referral,
+    Provider, Referral, InitializeResult, CallToolResult, ReadResourceResult, // Add Results used
+    ListResourcesResult, ListToolsResult, CompleteResult,
+    ResourceContentUnion, // Needed for ReadResourceResult parsing/creation
 };
 use serde_json::{json, Value};
 use std::{
@@ -26,9 +27,7 @@ use std::{
 };
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
-// Removed tower imports related to boxing
-// use tower::layer::util::Stack;
-// use tower::ServiceBuilder;
+// use tower::Layer; // Removed unused import
 use tower_http::{
     cors::CorsLayer,
     trace::TraceLayer,
@@ -53,7 +52,7 @@ use crate::traits::MessageHandler;
 const DATA_PATH: &str = "data";
 const CONFIG_FILE_PATH: &str = "data/server/data.json";
 const SERVER_PORT: u16 = 3001;
-const PROTOCOL_VERSION_PLACEHOLDER: &str = "0.1.0-unknown";
+const PROTOCOL_VERSION_PLACEHOLDER: &str = "0.1.0-unknown"; // Example, use actual if defined
 
 
 // --- Shared Application State ---
@@ -118,10 +117,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .route("/api/admin/stats", get(admin::get_stats))
         .route("/api/admin/plugins", get(admin::get_plugins))
         // --- Layers ---
-        // Apply layers directly to the Router
-        .layer(TraceLayer::new_for_http()) // Apply tracing first
-        .layer(cors) // Apply CORS layer next
-        .with_state(app_state.clone()); // Apply state last
+        // Apply layers directly
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
+        .with_state(app_state.clone());
 
     // --- Start the Single Server ---
     let addr = SocketAddr::from(([0, 0, 0, 0], SERVER_PORT));
@@ -189,28 +188,24 @@ async fn ws_handler( ws: WebSocketUpgrade, State(state): State<Arc<AppState>>, _
     info!("WebSocket upgrade request (/mcpi) from client: {}", client_id);
     ws.on_upgrade(move |socket| handle_socket(socket, state, client_id))
 }
-async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>, client_id: String) {
-    info!("WebSocket client connected: {}", client_id); state.active_ws_connections.fetch_add(1, Ordering::SeqCst); loop { tokio::select! { msg_result = socket.recv() => { match msg_result { Some(Ok(msg)) => { if !process_ws_message(msg, &mut socket, &state, &client_id).await { break; } } Some(Err(e)) => { warn!("WS recv error from {}: {}", client_id, e); break; } None => { info!("WS client {} disconnected (recv None)", client_id); break; } } } } } info!("WebSocket client disconnected: {}", client_id); state.active_ws_connections.fetch_sub(1, Ordering::SeqCst);
-}
-async fn process_ws_message( msg: Message, socket: &mut WebSocket, state: &Arc<AppState>, client_id: &str, ) -> bool {
-    match msg { Message::Text(text) => { info!("Received text from WS {}: {}", client_id, text.chars().take(100).collect::<String>()); if let Some(response) = state.message_handler.handle_message(text, client_id.to_string()).await { if socket.send(Message::Text(response)).await.is_err() { return false; } } } Message::Binary(_) => warn!("Unexpected binary msg from WS {}", client_id), Message::Ping(data) => if socket.send(Message::Pong(data)).await.is_err() { return false; }, Message::Pong(_) => info!("Received Pong from WS {}", client_id), Message::Close(_) => { info!("WS client {} sent close frame", client_id); return false; } } true
-}
+async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>, client_id: String) { info!("WebSocket client connected: {}", client_id); state.active_ws_connections.fetch_add(1, Ordering::SeqCst); loop { tokio::select! { msg_result = socket.recv() => { match msg_result { Some(Ok(msg)) => { if !process_ws_message(msg, &mut socket, &state, &client_id).await { break; } } Some(Err(e)) => { warn!("WS recv error from {}: {}", client_id, e); break; } None => { info!("WS client {} disconnected (recv None)", client_id); break; } } } } } info!("WebSocket client disconnected: {}", client_id); state.active_ws_connections.fetch_sub(1, Ordering::SeqCst); }
+async fn process_ws_message( msg: Message, socket: &mut WebSocket, state: &Arc<AppState>, client_id: &str, ) -> bool { match msg { Message::Text(text) => { info!("Received text from WS {}: {}", client_id, text.chars().take(100).collect::<String>()); if let Some(response) = state.message_handler.handle_message(text, client_id.to_string()).await { if socket.send(Message::Text(response)).await.is_err() { return false; } } } Message::Binary(_) => warn!("Unexpected binary msg from WS {}", client_id), Message::Ping(data) => if socket.send(Message::Pong(data)).await.is_err() { return false; }, Message::Pong(_) => info!("Received Pong from WS {}", client_id), Message::Close(_) => { info!("WS client {} sent close frame", client_id); return false; } } true }
 
 // --- Other Handlers (Discovery, MCP Processing Logic) ---
-async fn discovery_handler(State(state): State<Arc<AppState>>) -> Json<DiscoveryResponse> {
-    state.request_count.fetch_add(1, Ordering::SeqCst); info!("Handling /mcpi/discover request");
-    let provider = Provider { name: state.provider_info.get("name").and_then(|n|n.as_str()).unwrap_or("").to_string(), domain: state.provider_info.get("domain").and_then(|d|d.as_str()).unwrap_or("").to_string(), description: state.provider_info.get("description").and_then(|d|d.as_str()).unwrap_or("").to_string(), branding: None };
-    let referrals = if let Some(refs) = state.referrals.as_array() { refs.iter().filter_map(|r| Some(Referral{name: r.get("name")?.as_str()?.to_string(), domain: r.get("domain")?.as_str()?.to_string(), relationship: r.get("relationship")?.as_str()?.to_string() })).collect() } else { vec![] };
-    let caps = state.registry.get_all_plugins().iter().map(|p| CapabilityDescription{name: p.name().to_string(), description: p.description().to_string(), category: p.category().to_string(), operations: p.supported_operations()}).collect();
-    Json(DiscoveryResponse { provider, mode: "active".to_string(), capabilities: caps, referrals })
-}
+async fn discovery_handler(State(state): State<Arc<AppState>>) -> Json<DiscoveryResponse> { state.request_count.fetch_add(1, Ordering::SeqCst); info!("Handling /mcpi/discover request"); let provider = Provider { name: state.provider_info.get("name").and_then(|n|n.as_str()).unwrap_or("").to_string(), domain: state.provider_info.get("domain").and_then(|d|d.as_str()).unwrap_or("").to_string(), description: state.provider_info.get("description").and_then(|d|d.as_str()).unwrap_or("").to_string(), branding: None }; let referrals = if let Some(refs) = state.referrals.as_array() { refs.iter().filter_map(|r| Some(Referral{name: r.get("name")?.as_str()?.to_string(), domain: r.get("domain")?.as_str()?.to_string(), relationship: r.get("relationship")?.as_str()?.to_string() })).collect() } else { vec![] }; let caps = state.registry.get_all_plugins().iter().map(|p| CapabilityDescription{name: p.name().to_string(), description: p.description().to_string(), category: p.category().to_string(), operations: p.supported_operations()}).collect(); Json(DiscoveryResponse { provider, mode: "active".to_string(), capabilities: caps, referrals }) }
 
 // --- MCP Message Processing Logic ---
 pub async fn process_mcp_message( message: &str, registry: &Arc<PluginRegistry>, provider_info: &Arc<Value>, ) -> Option<String> {
     match serde_json::from_str::<MCPRequest>(message) {
         Ok(req) => { let span=tracing::info_span!("process_mcp_req",id=%req.id,method=%req.method); let _e=span.enter(); info!("Processing"); match req.method.as_str() {
-            "initialize" => Some(handle_initialize(&req, registry, provider_info)), "resources/list" => Some(handle_list_resources(&req, registry, provider_info)), "resources/read" => Some(handle_read_resource(&req, registry)), "tools/list" => Some(handle_list_tools(&req, registry)), "tools/call" => Some(handle_call_tool(&req, registry)), "completions" => Some(handle_completions(&req, registry)), "ping" => Some(handle_ping(&req)),
-            _ => { warn!("Method not found"); Some(create_error_response(req.id, -32601, format!("Method not found: {}", req.method))) }
+            "initialize" => Some(handle_initialize(&req, registry, provider_info)),
+            "resources/list" => Some(handle_list_resources(&req, registry, provider_info)),
+            "resources/read" => Some(handle_read_resource(&req, registry)),
+            "tools/list" => Some(handle_list_tools(&req, registry)),
+            "tools/call" => Some(handle_call_tool(&req, registry)),
+            "completions" => Some(handle_completions(&req, registry)), // Assuming completions exists
+            "ping" => Some(handle_ping(&req)),
+            _ => { warn!("Method not found: {}", req.method); Some(create_error_response(req.id, -32601, format!("Method not found: {}", req.method))) } // Use req.id here
         }}
         Err(e) => { error!("Parse error: {}", e); Some(create_error_response(Value::Null, -32700, format!("Parse error: {}", e))) }
     }
@@ -218,25 +213,210 @@ pub async fn process_mcp_message( message: &str, registry: &Arc<PluginRegistry>,
 
 // --- MCP Request Handler Implementations ---
 fn handle_initialize(_request: &MCPRequest, registry: &Arc<PluginRegistry>, provider_info: &Arc<Value>) -> String {
-    let caps=ServerCapabilities{resources:Some(ResourcesCapability{list_changed:true,subscribe:true}),tools:Some(ToolsCapability{list_changed:true}),prompts:None,logging:None}; let name=provider_info.get("name").and_then(|v|v.as_str()).unwrap_or("").to_string(); let desc=provider_info.get("description").and_then(|v|v.as_str()).unwrap_or("").to_string(); let _names=registry.get_all_plugins().iter().map(|p|p.name()).collect::<Vec<_>>(); json!({"jsonrpc":"2.0","id":_request.id,"result":{"serverInfo":{"name":name,"version":MCPI_VERSION},"protocolVersion":PROTOCOL_VERSION_PLACEHOLDER,"capabilities":caps,"instructions":format!("Provider: {}",desc)}}).to_string()
+    // FIX: Add missing fields to ServerCapabilities initializer
+    let caps=ServerCapabilities{
+        resources:Some(ResourcesCapability{list_changed:true,subscribe:true}),
+        tools:Some(ToolsCapability{list_changed:true}),
+        prompts:None, // Assuming not supported yet
+        logging:None, // Assuming not supported yet
+        completions: None, // Assuming not supported yet
+        experimental: None // Assuming no experimental features
+    };
+    let name=provider_info.get("name").and_then(|v|v.as_str()).unwrap_or("").to_string();
+    let desc=provider_info.get("description").and_then(|v|v.as_str()).unwrap_or("").to_string();
+    let _names=registry.get_all_plugins().iter().map(|p|p.name()).collect::<Vec<_>>(); // Mark unused if instructions don't use it
+    // Ensure InitializeResult matches common definition
+    let result = InitializeResult {
+        server_info: mcpi_common::Implementation { name, version: MCPI_VERSION.to_string() }, // Use Implementation struct
+        protocol_version: PROTOCOL_VERSION_PLACEHOLDER.to_string(), // Or LATEST_MCP_VERSION depending on transport
+        capabilities: caps,
+        instructions: Some(format!("Provider: {}", desc)), // Ensure instructions are Option<String>
+        _meta: None,
+    };
+    json!({"jsonrpc":"2.0","id":_request.id, "result": result }).to_string() // Serialize the result struct
 }
+
 fn handle_list_resources(_request: &MCPRequest, registry: &Arc<PluginRegistry>, provider_info: &Arc<Value>) -> String {
-    let domain=provider_info.get("domain").and_then(|d|d.as_str()).unwrap_or("example.com"); let resources=registry.get_all_plugins().iter().flat_map(|p|p.get_resources().into_iter().map(|(n,s,d)|Resource{name:n,description:d,uri:format!("mcpi://{}/resources/{}/{}",domain,p.name(),s),mime_type:Some("application/json".into()),size:None})).collect::<Vec<_>>(); json!({"jsonrpc":"2.0","id":_request.id,"result":{"resources":resources}}).to_string()
+    let domain=provider_info.get("domain").and_then(|d|d.as_str()).unwrap_or("example.com");
+    let resources=registry.get_all_plugins().iter().flat_map(|p|p.get_resources().into_iter().map(|(n,s,d)|Resource{
+        name:n,
+        description:d,
+        uri:format!("mcpi://{}/resources/{}/{}",domain,p.name(),s),
+        mime_type:Some("application/json".into()),
+        // FIX: Remove size field, add annotations if needed
+        annotations: None,
+    })).collect::<Vec<_>>();
+    // Use ListResourcesResult struct
+    let result = ListResourcesResult {
+        resources,
+        next_cursor: None, // Add pagination later if needed
+        _meta: None,
+    };
+    json!({"jsonrpc":"2.0","id":_request.id, "result": result }).to_string() // Serialize the result struct
 }
+
 fn handle_read_resource(request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
-     if let Some(u)=request.params.as_ref().and_then(|p|p.get("uri")?.as_str()){if let Ok(uri)=Url::parse(u){if uri.scheme()=="mcpi"{let path:Vec<&str>=uri.path_segments().map(|i|i.collect()).unwrap_or_default();if path.len()>=3&&path[0]=="resources"{let(p_name,r_suffix)=(path[1],path[2..].join("/"));if let Some(p)=registry.get_plugin(p_name){match p.read_resource(&r_suffix){Ok(c)=>return json!({"jsonrpc":"2.0","id":request.id,"result":{"contents":[c]}}).to_string(),Err(e)=>{warn!("Read err: {}",e);return create_error_response(request.id.clone(),100,format!("Read err: {}",e));}}}else{warn!("Plugin not found: {}",p_name);}}else{warn!("Invalid path: {}",uri.path());}}else{warn!("Invalid scheme: {}",uri.scheme());}}else{warn!("Invalid URI: {}",u);}}else{warn!("Missing URI");} create_error_response(request.id.clone(),-32602,"Invalid params".into())
+     if let Some(u)=request.params.as_ref().and_then(|p|p.get("uri")?.as_str()){
+         if let Ok(uri)=Url::parse(u){
+             if uri.scheme()=="mcpi"{ // Should this be `mcp` or handle both? Assuming mcpi for now
+                 let path:Vec<&str>=uri.path_segments().map(|i|i.collect()).unwrap_or_default();
+                 if path.len()>=3&&path[0]=="resources"{
+                     let(p_name,r_suffix)=(path[1],path[2..].join("/"));
+                     if let Some(p)=registry.get_plugin(p_name){
+                         match p.read_resource(&r_suffix){
+                             // read_resource now returns Result<ContentItem, Error>
+                             // Need to wrap this in ReadResourceResult which expects Vec<ResourceContentUnion>
+                             Ok(content_item) => {
+                                 // Convert ContentItem (potentially Text) into ResourceContentUnion
+                                 let resource_content = match content_item {
+                                     ContentItem::Text { text, .. } => {
+                                         // Assuming text resources map to TextResourceContents
+                                         ResourceContentUnion::Text(mcpi_common::TextResourceContents {
+                                             uri: u.to_string(), // Use original URI
+                                             mime_type: Some("text/plain".to_string()), // Or determine more accurately
+                                             text,
+                                         })
+                                     },
+                                     // Handle other ContentItem variants if read_resource can return them
+                                     _ => {
+                                         warn!("Cannot represent ContentItem {:?} as ResourceContentUnion", content_item);
+                                         return create_error_response(request.id.clone(), 101, "Internal error: Cannot format resource content".to_string());
+                                     }
+                                 };
+                                 let result = ReadResourceResult { contents: vec![resource_content] };
+                                 return json!({"jsonrpc":"2.0","id":request.id, "result": result }).to_string(); // Serialize result struct
+                             },
+                             Err(e)=>{warn!("Read err: {}",e);return create_error_response(request.id.clone(),100,format!("Read err: {}",e));}
+                         }
+                     } else {warn!("Plugin not found: {}",p_name);}
+                 } else {warn!("Invalid path: {}",uri.path());}
+             } else {warn!("Invalid scheme: {}",uri.scheme());}
+         } else {warn!("Invalid URI: {}",u);}
+     } else {warn!("Missing URI");}
+     create_error_response(request.id.clone(),-32602,"Invalid params for resources/read".into())
 }
+
 fn handle_list_tools(_request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
-    let tools=registry.get_all_plugins().iter().map(|p|Tool{name:p.name().into(),description:Some(p.description().into()),input_schema:p.input_schema(),annotations:p.get_tool_annotations()}).collect::<Vec<_>>(); json!({"jsonrpc":"2.0","id":_request.id,"result":{"tools":tools}}).to_string()
+    let tools=registry.get_all_plugins().iter().map(|p|Tool{name:p.name().into(),description:Some(p.description().into()),input_schema:p.input_schema(),annotations:p.get_tool_annotations()}).collect::<Vec<_>>();
+    // Use ListToolsResult struct
+    let result = ListToolsResult {
+        tools,
+        next_cursor: None, // Add pagination later if needed
+        _meta: None,
+    };
+    json!({"jsonrpc":"2.0","id":_request.id, "result": result }).to_string() // Serialize result struct
 }
+
 fn handle_call_tool(request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
-     if let Some(p)=request.params.as_ref().and_then(|p|p.as_object()){if let(Some(name),Some(args))=(p.get("name").and_then(|n|n.as_str()),p.get("arguments")){let op=args.get("operation").and_then(|o|o.as_str()).unwrap_or("DEFAULT");match registry.execute_plugin(name,op,args){Ok(res)=>{let c=match res{Value::String(s)=>vec![ContentItem::Text{text:s}],Value::Null=>vec![],_=>vec![ContentItem::Text{text:res.to_string()}]};return json!({"jsonrpc":"2.0","id":request.id,"result":{"content":c}}).to_string();},Err(e)=>{let ec=ContentItem::Text{text:format!("Exec err: {}",e)};return json!({"jsonrpc":"2.0","id":request.id,"result":{"content":[ec],"isError":true}}).to_string();}}}} create_error_response(request.id.clone(),-32602,"Invalid params".into())
+     if let Some(p)=request.params.as_ref().and_then(|p|p.as_object()){
+         if let(Some(name),Some(args))=(p.get("name").and_then(|n|n.as_str()),p.get("arguments")){
+             let op=args.get("operation").and_then(|o|o.as_str()).unwrap_or("DEFAULT");
+             match registry.execute_plugin(name,op,args){
+                 Ok(res)=>{
+                     // execute_plugin returns Result<Value,...>
+                     // We need to construct a CallToolResult
+                     let content_items = match res{
+                         Value::String(s)=>vec![ContentItem::Text{text:s, annotations: None}], // FIX: Add annotations
+                         Value::Null=>vec![],
+                         // Try to format other results nicely, default to string
+                         _=>vec![ContentItem::Text{text: serde_json::to_string_pretty(&res).unwrap_or_else(|_| res.to_string()), annotations: None}] // FIX: Add annotations
+                     };
+                     let result = CallToolResult {
+                         content: content_items,
+                         is_error: false, // Success case
+                         _meta: None,
+                     };
+                     return json!({"jsonrpc":"2.0","id":request.id, "result": result }).to_string(); // Serialize result struct
+                 },
+                 Err(e)=>{
+                     // Tool execution failed, format as error within CallToolResult
+                     let error_content = vec![ContentItem::Text{text:format!("Exec err: {}",e), annotations: None}]; // FIX: Add annotations
+                     let result = CallToolResult {
+                         content: error_content,
+                         is_error: true, // Indicate error
+                         _meta: None,
+                     };
+                     // Note: JSON-RPC itself succeeded, the *tool* failed.
+                     return json!({"jsonrpc":"2.0","id":request.id, "result": result }).to_string(); // Serialize result struct
+                 }
+             }
+         }
+     }
+     create_error_response(request.id.clone(),-32602,"Invalid params for tools/call".into())
 }
+
+// Updated based on schema for completion/complete
 fn handle_completions(_request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
-     let suggestions:Vec<Value>=vec![]; if let Some(p)=_request.params.as_ref().and_then(|p|p.as_object()){if let(Some(m),Some(pn),Some(pv))=(p.get("method").and_then(|m|m.as_str()),p.get("parameterName").and_then(|p|p.as_str()),p.get("partialValue")){if m=="tools/call"{let ctx=p.get("context").cloned().unwrap_or(Value::Null);if let Some(t_name)=ctx.get("name").and_then(|n|n.as_str()){if let Some(plugin)=registry.get_plugin(t_name){let sugg=plugin.get_completions(pn,pv,&ctx);return json!({"jsonrpc":"2.0","id":_request.id,"result":{"suggestions":sugg}}).to_string();}}else if pn=="name"{let names:Vec<String>=registry.get_all_plugins().iter().map(|p|p.name().to_string()).filter(|n|n.starts_with(pv.as_str().unwrap_or(""))).collect();return json!({"jsonrpc":"2.0","id":_request.id,"result":{"suggestions":names}}).to_string();}}}} json!({"jsonrpc":"2.0","id":_request.id,"result":{"suggestions":suggestions}}).to_string()
+     // Parse params according to CompleteRequestParams structure
+     let params: Result<mcpi_common::CompleteRequestParams, _> = _request.params.clone().map_or_else(
+         || Err("Missing params".to_string()), // Handle None params case
+         |p| serde_json::from_value(p).map_err(|e| e.to_string())
+     );
+
+     match params {
+         Ok(comp_params) => {
+             let suggestions: Vec<Value> = vec![]; // Default empty
+             let param_name = &comp_params.argument.name;
+             let partial_value = &comp_params.argument.value; // This is the value to complete
+
+             // Extract tool name from context if completing tool arguments
+             let tool_name_context = comp_params.context.as_ref()
+                 .and_then(|ctx| ctx.get("name")) // Assuming context might contain "name"
+                 .and_then(|v| v.as_str());
+
+             // Logic based on param_name and context
+             if param_name == "name" && tool_name_context.is_none() {
+                 // Top-level tool name completion
+                 let tool_names: Vec<String> = registry.get_all_plugins().iter()
+                     .map(|p|p.name().to_string())
+                     .filter(|n|n.starts_with(partial_value))
+                     .collect();
+                 let result = CompleteResult {
+                     completion: mcpi_common::CompleteResultCompletion {
+                         values: tool_names, total: None, has_more: None,
+                     },
+                     _meta: None,
+                 };
+                 return json!({"jsonrpc":"2.0", "id": _request.id, "result": result}).to_string();
+             } else if let Some(tool_name) = tool_name_context {
+                 // Argument completion for a specific tool
+                 if let Some(plugin) = registry.get_plugin(tool_name) {
+                      // Pass Value for partial_value and context
+                      let partial_value_json = Value::String(partial_value.clone());
+                      let context_json = serde_json::to_value(&comp_params.context).unwrap_or(Value::Null); // Pass full context
+                      let sugg_values = plugin.get_completions(param_name, &partial_value_json, &context_json);
+                      // get_completions returns Vec<Value>, convert to Vec<String> if possible
+                      let string_suggestions = sugg_values.into_iter().filter_map(|v| v.as_str().map(String::from)).collect();
+                      let result = CompleteResult {
+                         completion: mcpi_common::CompleteResultCompletion {
+                             values: string_suggestions, total: None, has_more: None,
+                         },
+                         _meta: None,
+                      };
+                      return json!({"jsonrpc":"2.0", "id": _request.id, "result": result}).to_string();
+                 }
+             }
+             // Fallback: No specific logic found
+             let result = CompleteResult { completion: mcpi_common::CompleteResultCompletion { values: vec![], total: None, has_more: None }, _meta: None };
+             json!({ "jsonrpc": "2.0", "id": _request.id, "result": result }).to_string()
+
+         }
+         Err(e) => {
+             warn!("Invalid params for completions: {}", e);
+             create_error_response(_request.id.clone(), -32602, format!("Invalid params for completion/complete: {}", e))
+         }
+     }
+
 }
-fn handle_ping(_request: &MCPRequest) -> String { json!({"jsonrpc":"2.0","id":_request.id,"result":{}}).to_string() }
-fn create_error_response(id: Value, code: i32, message: String) -> String { json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}}).to_string() }
+
+fn handle_ping(_request: &MCPRequest) -> String {
+    // Use EmptyResult struct
+    let result = mcpi_common::EmptyResult { _meta: None };
+    json!({"jsonrpc":"2.0", "id": _request.id, "result": result }).to_string()
+}
+fn create_error_response(id: Value, code: i32, message: String) -> String {
+    json!({"jsonrpc":"2.0", "id": id, "error": {"code":code, "message":message}}).to_string()
+}
 
 // --- Utility Functions ---
 fn validate_paths() -> Result<(), Box<dyn Error + Send + Sync>> { let c=Path::new(CONFIG_FILE_PATH); let d=Path::new(DATA_PATH); if !c.exists(){return Err(format!("Config file missing: {}",CONFIG_FILE_PATH).into());} if !d.exists(){return Err(format!("Data dir missing: {}",DATA_PATH).into());} Ok(()) }
