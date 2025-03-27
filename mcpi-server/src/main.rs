@@ -1,598 +1,243 @@
 // mcpi-server/src/main.rs
+
+// --- Standard Imports ---
 use axum::{
-    extract::{State, WebSocketUpgrade},
-    routing::get,
-    Json, Router,
+    extract::{ws::{WebSocket, WebSocketUpgrade, Message}, State},
+    response::{IntoResponse, Response},
+    routing::{get, post, delete}, // Keep post/delete for /mcpi route
+    Router, Json,
+    // Removed BoxError
+    http::{StatusCode, HeaderMap},
 };
-use futures::{SinkExt, StreamExt};
-use mcpi_common::{
-    CapabilityDescription, DiscoveryResponse, MCPRequest, Resource, Tool, MCPI_VERSION,
+use mcpi_common::{ // Group common imports
+    CapabilityDescription, DiscoveryResponse, MCPRequest, Resource, Tool,
+    ServerCapabilities, MCPI_VERSION, ContentItem, ResourcesCapability, ToolsCapability,
+    Provider, Referral,
 };
 use serde_json::{json, Value};
-use std::net::SocketAddr;
-use std::path::Path;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    path::Path,
+    sync::{atomic::{AtomicUsize, Ordering}, Arc},
+    time::Instant,
+    fs,
+    error::Error,
 };
-use std::time::Instant;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::trace::TraceLayer;
-use uuid::Uuid;
-
-use std::fs;
+use tokio::net::TcpListener;
+use tokio::sync::RwLock;
+// Removed tower imports related to boxing
+// use tower::layer::util::Stack;
+// use tower::ServiceBuilder;
+use tower_http::{
+    cors::CorsLayer,
+    trace::TraceLayer,
+};
 use tracing::{error, info, warn};
+use url::Url;
+use rand::Rng;
 
+// --- Local Modules ---
 mod admin;
 mod message_handler;
 mod plugin_registry;
 mod plugins;
-mod transport;
+mod traits;
 
 use message_handler::McpMessageHandler;
 use plugin_registry::PluginRegistry;
-use transport::traits::MessageHandler; // Add this import
+use crate::traits::MessageHandler;
 
-// Define paths as constants
+
+// --- Constants ---
 const DATA_PATH: &str = "data";
 const CONFIG_FILE_PATH: &str = "data/server/data.json";
+const SERVER_PORT: u16 = 3001;
+const PROTOCOL_VERSION_PLACEHOLDER: &str = "0.1.0-unknown";
 
+
+// --- Shared Application State ---
+pub struct AppState {
+    registry: Arc<PluginRegistry>,
+    provider_info: Arc<Value>,
+    referrals: Arc<Value>,
+    message_handler: Arc<McpMessageHandler>,
+    http_sessions: Arc<RwLock<HashMap<String, HttpSessionInfo>>>,
+    active_ws_connections: AtomicUsize,
+    request_count: AtomicUsize,
+    startup_time: Instant,
+}
+
+// --- Session Info for Streamable HTTP ---
+struct HttpSessionInfo {
+    last_event_id: Option<String>,
+}
+
+// --- Main Function ---
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Initialize tracing
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
-
-    // Validate paths
     validate_paths()?;
-
-    // Load configuration
     let config = load_config()?;
 
-    // Extract provider info and referrals
-    let provider_info = config.get("provider").cloned().unwrap_or_else(|| json!({}));
-    let referrals = config
-        .get("referrals")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
+    let provider_info = Arc::new(config.get("provider").cloned().unwrap_or_else(|| json!({})));
+    let referrals = Arc::new(config.get("referrals").cloned().unwrap_or_else(|| json!([])));
 
-    // Initialize plugin registry
     let registry = Arc::new(PluginRegistry::new());
-
-    // Register all plugins
-    registry.register_all_plugins(DATA_PATH, referrals.clone())?;
+    registry.register_all_plugins(DATA_PATH, (*referrals).clone())?;
     info!("Registered {} plugins", registry.get_all_plugins().len());
 
-    // Create app state
+    // --- Initialize State ---
+    // McpMessageHandler takes Arc<PluginRegistry> and Arc<Value>
+    let message_handler = Arc::new(McpMessageHandler::new(
+        registry.clone(),
+        provider_info.clone(),
+    ));
+
     let app_state = Arc::new(AppState {
-        registry: registry.clone(),
-        provider_info: provider_info.clone(),
-        referrals: referrals.clone(),
-        active_connections: AtomicUsize::new(0),
+        registry,
+        provider_info,
+        referrals,
+        message_handler,
+        http_sessions: Arc::new(RwLock::new(HashMap::new())),
+        active_ws_connections: AtomicUsize::new(0),
         request_count: AtomicUsize::new(0),
         startup_time: Instant::now(),
     });
 
-    // Build CORS layer
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // --- Configure CORS ---
+    let cors = CorsLayer::permissive();
 
-    // Create message handler for WebSocket
-    let message_handler = Arc::new(McpMessageHandler::new(app_state.clone()));
-
-    // Create HTTP router for admin and discovery endpoints
-    let app = Router::new()
+    // --- Build the SINGLE Router for ALL services (Port 3001) ---
+    let app_router = Router::new()
+        // --- Routes ---
+        .route("/mcp", get(handle_streamable_get).post(handle_streamable_post).delete(handle_streamable_delete))
+        .route("/mcpi", get(ws_handler))
         .route("/mcpi/discover", get(discovery_handler))
         .route("/admin", get(admin::serve_admin_html))
         .route("/api/admin/stats", get(admin::get_stats))
         .route("/api/admin/plugins", get(admin::get_plugins))
-        .with_state(app_state.clone());
-    
-    // Create WebSocket route
-    let ws_route = Router::new()
-        .route("/mcpi", get({
-            let handler = message_handler.clone();
-            move |ws: WebSocketUpgrade| {
-                let handler = handler.clone();
-                async move {
-                    ws.on_upgrade(|socket| handle_websocket(socket, handler))
-                }
-            }
-        }));
-    
-    // Combine the routers
-    let combined_app = app
-        .merge(ws_route)
-        .layer(TraceLayer::new_for_http())
-        .layer(cors);
+        // --- Layers ---
+        // Apply layers directly to the Router
+        .layer(TraceLayer::new_for_http()) // Apply tracing first
+        .layer(cors) // Apply CORS layer next
+        .with_state(app_state.clone()); // Apply state last
 
-    // Set up server address
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
-    info!("Starting MCPI server on {}", addr);
+    // --- Start the Single Server ---
+    let addr = SocketAddr::from(([0, 0, 0, 0], SERVER_PORT));
+    info!("Starting unified server (MCP/MCPI/Admin) on {}", addr);
 
-    // Start the server with graceful shutdown
-    axum::Server::bind(&addr)
-        .serve(combined_app.into_make_service())
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.ok();
-            info!("Shutdown signal received");
-        })
+    let listener = TcpListener::bind(addr).await?;
+    info!("Server listening on {}", addr);
+
+    axum::serve(listener, app_router.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    info!("MCPI server shut down successfully");
-    
+    info!("Server shut down successfully");
     Ok(())
 }
 
-// Handle WebSocket connections
-async fn handle_websocket(socket: axum::extract::ws::WebSocket, message_handler: Arc<McpMessageHandler>) {
-    let (mut sender, mut receiver) = socket.split();
-    
-    // Generate client ID
-    let client_id = Uuid::new_v4().to_string();
-    info!("WebSocket connection established: {}", client_id);
-    
-    // Process messages
-    while let Some(Ok(message)) = receiver.next().await {
-        if let axum::extract::ws::Message::Text(text) = message {
-            // Use the future returned by handle_message
-            if let Some(response) = message_handler.handle_message(text, client_id.clone()).await {
-                if let Err(e) = sender.send(axum::extract::ws::Message::Text(response)).await {
-                    error!("Error sending message: {}", e);
-                    break;
-                }
-            }
-        }
-    }
-    
-    info!("WebSocket connection closed: {}", client_id);
+// --- Graceful Shutdown Signal Handler ---
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c().await.expect("Failed to install Ctrl+C handler");
+    info!("Shutdown signal received...");
 }
 
-// Validate that necessary paths exist
-fn validate_paths() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let config_file = Path::new(CONFIG_FILE_PATH);
-    let data_dir = Path::new(DATA_PATH);
 
-    if !config_file.exists() {
-        warn!("Config file not found: {}", CONFIG_FILE_PATH);
-        return Err("No configuration file found. Please create config file to continue.".into());
-    }
-
-    if !data_dir.exists() {
-        warn!("Data directory not found: {}", DATA_PATH);
-        return Err("No data directory found. Please create data directory to continue.".into());
-    }
-
-    Ok(())
-}
-
-// Load configuration from file
-fn load_config() -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
-    let config_data = fs::read_to_string(CONFIG_FILE_PATH)?;
-    let config: Value = serde_json::from_str(&config_data)?;
-    Ok(config)
-}
-
-// REST discovery endpoint
-async fn discovery_handler(State(state): State<Arc<AppState>>) -> Json<DiscoveryResponse> {
-    // Increment request counter
+// --- Streamable HTTP Handlers ---
+async fn handle_streamable_get( State(state): State<Arc<AppState>>, headers: HeaderMap ) -> impl IntoResponse {
     state.request_count.fetch_add(1, Ordering::SeqCst);
+    let session_id = headers.get("mcp-session-id").and_then(|v| v.to_str().ok()).map(str::to_string);
+    let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok()).map(str::to_string);
 
-    // Extract provider name and domain
-    let provider_name = state
-        .provider_info
-        .get("name")
-        .and_then(|n| n.as_str())
-        .unwrap_or("MCPI Provider")
-        .to_string();
-
-    let provider_domain = state
-        .provider_info
-        .get("domain")
-        .and_then(|d| d.as_str())
-        .unwrap_or("example.com")
-        .to_string();
-
-    let provider_description = state
-        .provider_info
-        .get("description")
-        .and_then(|d| d.as_str())
-        .unwrap_or("MCPI Provider")
-        .to_string();
-
-    // Build provider from extracted info
-    let provider = mcpi_common::Provider {
-        name: provider_name,
-        domain: provider_domain,
-        description: provider_description,
-        branding: None,
-    };
-
-    // Extract referrals from state
-    let referrals = if let Some(refs_array) = state.referrals.as_array() {
-        refs_array
-            .iter()
-            .filter_map(|r| {
-                let name = r.get("name").and_then(|n| n.as_str())?;
-                let domain = r.get("domain").and_then(|d| d.as_str())?;
-                let relationship = r.get("relationship").and_then(|rel| rel.as_str())?;
-
-                Some(mcpi_common::Referral {
-                    name: name.to_string(),
-                    domain: domain.to_string(),
-                    relationship: relationship.to_string(),
-                })
-            })
-            .collect()
+    if let Some(ref id_str) = session_id {
+        let mut sessions = state.http_sessions.write().await;
+        let session = sessions.entry(id_str.clone()).or_insert_with(|| HttpSessionInfo { last_event_id: None });
+        if let Some(leid) = last_event_id { info!("Session {}: Updating last_event_id to {}", id_str, leid); session.last_event_id = Some(leid); }
+        info!("SSE stream requested for session: {}", id_str);
+        (StatusCode::OK, [ ("content-type", "text/event-stream"), ("cache-control", "no-cache"), ("connection", "keep-alive"), ], "data: Connected (SSE Placeholder)\n\n").into_response()
     } else {
-        Vec::new()
-    };
-
-    // Build capability descriptions from plugins
-    let capability_descriptions: Vec<CapabilityDescription> = state
-        .registry
-        .get_all_plugins()
-        .iter()
-        .map(|plugin| CapabilityDescription {
-            name: plugin.name().to_string(),
-            description: plugin.description().to_string(),
-            category: plugin.category().to_string(),
-            operations: plugin.supported_operations(),
-        })
-        .collect();
-
-    // Create response
-    let response = DiscoveryResponse {
-        provider,
-        mode: "active".to_string(),
-        capabilities: capability_descriptions,
-        referrals,
-    };
-
-    Json(response)
-}
-
-// Process an MCP message
-pub async fn process_mcp_message(message: &str, state: &Arc<AppState>) -> Option<String> {
-    // Parse the message
-    let request: Result<MCPRequest, _> = serde_json::from_str(message);
-
-    match request {
-        Ok(request) => match request.method.as_str() {
-            "initialize" => Some(handle_initialize(&request, state)),
-            "resources/list" => Some(handle_list_resources(&request, state)),
-            "resources/read" => Some(handle_read_resource(&request, state)),
-            "tools/list" => Some(handle_list_tools(&request, state)),
-            "tools/call" => Some(handle_call_tool(&request, state)),
-            "ping" => Some(handle_ping(&request)),
-            _ => Some(create_error_response(
-                request.id,
-                -32601,
-                format!("Method not found: {}", request.method),
-            )),
-        },
-        Err(e) => Some(create_error_response(
-            Value::Null,
-            -32700,
-            format!("Parse error: {}", e),
-        )),
+        warn!("GET /mcp missing mcp-session-id");
+        (StatusCode::BAD_REQUEST, "mcp-session-id header required").into_response()
     }
 }
 
-// Handle MCP initialize request
-fn handle_initialize(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    // Collect plugin names
-    let capability_names: Vec<String> = state
-        .registry
-        .get_all_plugins()
-        .iter()
-        .map(|plugin| plugin.name().to_string())
-        .collect();
+async fn handle_streamable_post( State(state): State<Arc<AppState>>, headers: HeaderMap, body: String ) -> impl IntoResponse {
+    state.request_count.fetch_add(1, Ordering::SeqCst);
+    let session_id = headers.get("mcp-session-id").and_then(|v| v.to_str().ok()).map(str::to_string);
+    let client_id = session_id.clone().unwrap_or_else(|| format!("http-{}", rand::thread_rng().gen::<u32>()));
 
-    // Extract provider name
-    let provider_name = state
-        .provider_info
-        .get("name")
-        .and_then(|n| n.as_str())
-        .unwrap_or("MCPI Provider")
-        .to_string();
+    if let Some(ref id_str) = session_id { if !state.http_sessions.read().await.contains_key(id_str) { warn!("POST /mcp for non-existent session: {}", id_str); } else { info!("POST /mcp for session: {}", id_str); } }
+    else { info!("POST /mcp without session ID (client_id: {})", client_id); }
 
-    // Extract provider description
-    let provider_description = state
-        .provider_info
-        .get("description")
-        .and_then(|d| d.as_str())
-        .unwrap_or("MCPI Provider")
-        .to_string();
-
-    let response = json!({
-        "jsonrpc": "2.0",
-        "id": request.id,
-        "result": {
-            "serverInfo": {
-                "name": provider_name,
-                "version": MCPI_VERSION
-            },
-            "protocolVersion": "0.1.0",
-            "capabilities": {
-                "resources": {
-                    "listChanged": true,
-                    "subscribe": true
-                },
-                "tools": {
-                    "listChanged": true
-                }
-            },
-            "instructions": format!("This is an MCPI server for {}. You can access plugins like: {}.",
-                provider_description,
-                capability_names.join(", ")
-            )
-        }
-    });
-
-    response.to_string()
+    if let Some(response_body) = state.message_handler.handle_message(body, client_id).await { (StatusCode::OK, [("content-type", "application/json")], response_body).into_response() }
+    else { (StatusCode::NO_CONTENT, "").into_response() }
 }
 
-// Handle MCP resources/list request
-fn handle_list_resources(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    // Extract provider domain
-    let provider_domain = state
-        .provider_info
-        .get("domain")
-        .and_then(|d| d.as_str())
-        .unwrap_or("example.com")
-        .to_string();
-
-    // Collect resources from all plugins
-    let resources: Vec<Resource> = state
-        .registry
-        .get_all_plugins()
-        .iter()
-        .flat_map(|plugin| {
-            plugin
-                .get_resources()
-                .into_iter()
-                .map(|(name, uri, description)| Resource {
-                    name,
-                    description,
-                    uri: uri.replace("provider", &provider_domain),
-                    mime_type: Some("application/json".to_string()),
-                    size: None,
-                })
-        })
-        .collect();
-
-    let response = json!({
-        "jsonrpc": "2.0",
-        "id": request.id,
-        "result": {
-            "resources": resources
-        }
-    });
-
-    response.to_string()
+async fn handle_streamable_delete( State(state): State<Arc<AppState>>, headers: HeaderMap ) -> impl IntoResponse {
+    state.request_count.fetch_add(1, Ordering::SeqCst);
+    if let Some(session_id) = headers.get("mcp-session-id").and_then(|v| v.to_str().ok()) {
+        if state.http_sessions.write().await.remove(session_id).is_some() { info!("Session {} terminated via DELETE /mcp", session_id); (StatusCode::OK, "Session terminated").into_response() }
+        else { warn!("DELETE /mcp for non-existent session: {}", session_id); (StatusCode::NOT_FOUND, "Session not found").into_response() }
+    } else { warn!("DELETE /mcp missing mcp-session-id"); (StatusCode::BAD_REQUEST, "mcp-session-id header required").into_response() }
 }
 
-// Handle MCP resources/read request
-fn handle_read_resource(request: &MCPRequest, _state: &Arc<AppState>) -> String {
-    if let Some(params) = &request.params {
-        if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
-            info!("Resource URI requested: {}", uri);
+// --- WebSocket Handlers ---
+async fn ws_handler( ws: WebSocketUpgrade, State(state): State<Arc<AppState>>, _headers: HeaderMap ) -> Response {
+    let client_id = format!("ws-{}", rand::thread_rng().gen::<u32>());
+    info!("WebSocket upgrade request (/mcpi) from client: {}", client_id);
+    ws.on_upgrade(move |socket| handle_socket(socket, state, client_id))
+}
+async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>, client_id: String) {
+    info!("WebSocket client connected: {}", client_id); state.active_ws_connections.fetch_add(1, Ordering::SeqCst); loop { tokio::select! { msg_result = socket.recv() => { match msg_result { Some(Ok(msg)) => { if !process_ws_message(msg, &mut socket, &state, &client_id).await { break; } } Some(Err(e)) => { warn!("WS recv error from {}: {}", client_id, e); break; } None => { info!("WS client {} disconnected (recv None)", client_id); break; } } } } } info!("WebSocket client disconnected: {}", client_id); state.active_ws_connections.fetch_sub(1, Ordering::SeqCst);
+}
+async fn process_ws_message( msg: Message, socket: &mut WebSocket, state: &Arc<AppState>, client_id: &str, ) -> bool {
+    match msg { Message::Text(text) => { info!("Received text from WS {}: {}", client_id, text.chars().take(100).collect::<String>()); if let Some(response) = state.message_handler.handle_message(text, client_id.to_string()).await { if socket.send(Message::Text(response)).await.is_err() { return false; } } } Message::Binary(_) => warn!("Unexpected binary msg from WS {}", client_id), Message::Ping(data) => if socket.send(Message::Pong(data)).await.is_err() { return false; }, Message::Pong(_) => info!("Received Pong from WS {}", client_id), Message::Close(_) => { info!("WS client {} sent close frame", client_id); return false; } } true
+}
 
-            // Parse the URI to extract the resource path
-            // Format: mcpi://domain/resources/plugin-type/resource-name/data.json
-            // Example: mcpi://example.com/resources/store/products/data.json
+// --- Other Handlers (Discovery, MCP Processing Logic) ---
+async fn discovery_handler(State(state): State<Arc<AppState>>) -> Json<DiscoveryResponse> {
+    state.request_count.fetch_add(1, Ordering::SeqCst); info!("Handling /mcpi/discover request");
+    let provider = Provider { name: state.provider_info.get("name").and_then(|n|n.as_str()).unwrap_or("").to_string(), domain: state.provider_info.get("domain").and_then(|d|d.as_str()).unwrap_or("").to_string(), description: state.provider_info.get("description").and_then(|d|d.as_str()).unwrap_or("").to_string(), branding: None };
+    let referrals = if let Some(refs) = state.referrals.as_array() { refs.iter().filter_map(|r| Some(Referral{name: r.get("name")?.as_str()?.to_string(), domain: r.get("domain")?.as_str()?.to_string(), relationship: r.get("relationship")?.as_str()?.to_string() })).collect() } else { vec![] };
+    let caps = state.registry.get_all_plugins().iter().map(|p| CapabilityDescription{name: p.name().to_string(), description: p.description().to_string(), category: p.category().to_string(), operations: p.supported_operations()}).collect();
+    Json(DiscoveryResponse { provider, mode: "active".to_string(), capabilities: caps, referrals })
+}
 
-            let parts: Vec<&str> = uri.split('/').collect();
-            if parts.len() >= 6 {
-                // Extract the resource path starting from the DATA_PATH
-                // Construct a path like: data/store/products/data.json
-                let resource_path = format!(
-                    "{}/{}/{}",
-                    DATA_PATH,
-                    parts[parts.len() - 3], // plugin type (e.g., store)
-                    parts[parts.len() - 2]  // resource name (e.g., products)
-                );
-
-                let filename = parts.last().unwrap();
-                let full_path = format!("{}/{}", resource_path, filename);
-
-                let data_path = Path::new(&full_path);
-
-                info!("Looking for file: {}", data_path.display());
-
-                // Check if the file exists
-                if data_path.exists() {
-                    info!("File exists: {}", data_path.display());
-
-                    // Read the JSON file
-                    match fs::read_to_string(data_path) {
-                        Ok(content) => {
-                            let response = json!({
-                                "jsonrpc": "2.0",
-                                "id": request.id,
-                                "result": {
-                                    "contents": [
-                                        {
-                                            "uri": uri,
-                                            "text": content,
-                                            "mimeType": "application/json"
-                                        }
-                                    ]
-                                }
-                            });
-
-                            return response.to_string();
-                        }
-                        Err(e) => {
-                            error!("Error reading file: {}", e);
-                            return create_error_response(
-                                request.id.clone(),
-                                100,
-                                format!("Error reading resource file: {}", e),
-                            );
-                        }
-                    }
-                } else {
-                    warn!("File does not exist: {}", data_path.display());
-                    return create_error_response(
-                        request.id.clone(),
-                        100,
-                        format!("Resource file not found: {}", full_path),
-                    );
-                }
-            }
-        }
+// --- MCP Message Processing Logic ---
+pub async fn process_mcp_message( message: &str, registry: &Arc<PluginRegistry>, provider_info: &Arc<Value>, ) -> Option<String> {
+    match serde_json::from_str::<MCPRequest>(message) {
+        Ok(req) => { let span=tracing::info_span!("process_mcp_req",id=%req.id,method=%req.method); let _e=span.enter(); info!("Processing"); match req.method.as_str() {
+            "initialize" => Some(handle_initialize(&req, registry, provider_info)), "resources/list" => Some(handle_list_resources(&req, registry, provider_info)), "resources/read" => Some(handle_read_resource(&req, registry)), "tools/list" => Some(handle_list_tools(&req, registry)), "tools/call" => Some(handle_call_tool(&req, registry)), "completions" => Some(handle_completions(&req, registry)), "ping" => Some(handle_ping(&req)),
+            _ => { warn!("Method not found"); Some(create_error_response(req.id, -32601, format!("Method not found: {}", req.method))) }
+        }}
+        Err(e) => { error!("Parse error: {}", e); Some(create_error_response(Value::Null, -32700, format!("Parse error: {}", e))) }
     }
-
-    create_error_response(
-        request.id.clone(),
-        -32602,
-        "Invalid params for resources/read".to_string(),
-    )
 }
 
-// Handle MCP tools/list request
-fn handle_list_tools(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    // Convert plugins to tools
-    let tools: Vec<Tool> = state
-        .registry
-        .get_all_plugins()
-        .iter()
-        .map(|plugin| Tool {
-            name: plugin.name().to_string(),
-            description: Some(plugin.description().to_string()),
-            input_schema: plugin.input_schema(),
-        })
-        .collect();
- 
-    let response = json!({
-        "jsonrpc": "2.0",
-        "id": request.id,
-        "result": {
-            "tools": tools
-        }
-    });
- 
-    response.to_string()
- }
- 
- // Handle MCP tools/call request
- fn handle_call_tool(request: &MCPRequest, state: &Arc<AppState>) -> String {
-    info!("Handling tools/call request");
- 
-    if let Some(params) = &request.params {
-        if let Some(tool_name) = params.get("name").and_then(|n| n.as_str()) {
-            info!("Calling tool: {}", tool_name);
- 
-            if let Some(arguments) = params.get("arguments").and_then(|a| a.as_object()) {
-                // Extract operation
-                let operation = arguments
-                    .get("operation")
-                    .and_then(|o| o.as_str())
-                    .unwrap_or("SEARCH");
- 
-                info!("Operation: {}", operation);
- 
-                // Execute the plugin operation
-                match state
-                    .registry
-                    .execute_plugin(tool_name, operation, &json!(arguments))
-                {
-                    Ok(result) => {
-                        info!("Tool execution successful");
-                        let response = json!({
-                            "jsonrpc": "2.0",
-                            "id": request.id,
-                            "result": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
-                                    }
-                                ]
-                            }
-                        });
- 
-                        return response.to_string();
-                    }
-                    Err(e) => {
-                        error!("Tool execution error: {}", e);
-                        let response = json!({
-                            "jsonrpc": "2.0",
-                            "id": request.id,
-                            "result": {
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": format!("Error: {}", e)
-                                    }
-                                ],
-                                "isError": true
-                            }
-                        });
- 
-                        return response.to_string();
-                    }
-                }
-            } else {
-                warn!("Missing 'arguments' in tools/call request");
-                return create_error_response(
-                    request.id.clone(),
-                    -32602,
-                    "Invalid params for tools/call".to_string(),
-                );
-            }
-        } else {
-            warn!("Missing 'name' in tools/call request");
-            return create_error_response(
-                request.id.clone(),
-                -32602,
-                "Invalid params for tools/call".to_string(),
-            );
-        }
-    } else {
-        warn!("Missing 'params' in tools/call request");
-        return create_error_response(
-            request.id.clone(),
-            -32602,
-            "Invalid params for tools/call".to_string(),
-        );
-    }
- }
- 
- // Handle MCP ping request
- fn handle_ping(request: &MCPRequest) -> String {
-    let response = json!({
-        "jsonrpc": "2.0",
-        "id": request.id,
-        "result": {}
-    });
- 
-    response.to_string()
- }
- 
- // Create an error response
- fn create_error_response(id: Value, code: i32, message: String) -> String {
-    let response = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    });
- 
-    response.to_string()
- }
- 
- // Shared application state
- pub struct AppState {
-    registry: Arc<PluginRegistry>,
-    provider_info: Value,
-    referrals: Value,
-    active_connections: AtomicUsize,
-    request_count: AtomicUsize,
-    startup_time: Instant,
- }
+// --- MCP Request Handler Implementations ---
+fn handle_initialize(_request: &MCPRequest, registry: &Arc<PluginRegistry>, provider_info: &Arc<Value>) -> String {
+    let caps=ServerCapabilities{resources:Some(ResourcesCapability{list_changed:true,subscribe:true}),tools:Some(ToolsCapability{list_changed:true}),prompts:None,logging:None}; let name=provider_info.get("name").and_then(|v|v.as_str()).unwrap_or("").to_string(); let desc=provider_info.get("description").and_then(|v|v.as_str()).unwrap_or("").to_string(); let _names=registry.get_all_plugins().iter().map(|p|p.name()).collect::<Vec<_>>(); json!({"jsonrpc":"2.0","id":_request.id,"result":{"serverInfo":{"name":name,"version":MCPI_VERSION},"protocolVersion":PROTOCOL_VERSION_PLACEHOLDER,"capabilities":caps,"instructions":format!("Provider: {}",desc)}}).to_string()
+}
+fn handle_list_resources(_request: &MCPRequest, registry: &Arc<PluginRegistry>, provider_info: &Arc<Value>) -> String {
+    let domain=provider_info.get("domain").and_then(|d|d.as_str()).unwrap_or("example.com"); let resources=registry.get_all_plugins().iter().flat_map(|p|p.get_resources().into_iter().map(|(n,s,d)|Resource{name:n,description:d,uri:format!("mcpi://{}/resources/{}/{}",domain,p.name(),s),mime_type:Some("application/json".into()),size:None})).collect::<Vec<_>>(); json!({"jsonrpc":"2.0","id":_request.id,"result":{"resources":resources}}).to_string()
+}
+fn handle_read_resource(request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
+     if let Some(u)=request.params.as_ref().and_then(|p|p.get("uri")?.as_str()){if let Ok(uri)=Url::parse(u){if uri.scheme()=="mcpi"{let path:Vec<&str>=uri.path_segments().map(|i|i.collect()).unwrap_or_default();if path.len()>=3&&path[0]=="resources"{let(p_name,r_suffix)=(path[1],path[2..].join("/"));if let Some(p)=registry.get_plugin(p_name){match p.read_resource(&r_suffix){Ok(c)=>return json!({"jsonrpc":"2.0","id":request.id,"result":{"contents":[c]}}).to_string(),Err(e)=>{warn!("Read err: {}",e);return create_error_response(request.id.clone(),100,format!("Read err: {}",e));}}}else{warn!("Plugin not found: {}",p_name);}}else{warn!("Invalid path: {}",uri.path());}}else{warn!("Invalid scheme: {}",uri.scheme());}}else{warn!("Invalid URI: {}",u);}}else{warn!("Missing URI");} create_error_response(request.id.clone(),-32602,"Invalid params".into())
+}
+fn handle_list_tools(_request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
+    let tools=registry.get_all_plugins().iter().map(|p|Tool{name:p.name().into(),description:Some(p.description().into()),input_schema:p.input_schema(),annotations:p.get_tool_annotations()}).collect::<Vec<_>>(); json!({"jsonrpc":"2.0","id":_request.id,"result":{"tools":tools}}).to_string()
+}
+fn handle_call_tool(request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
+     if let Some(p)=request.params.as_ref().and_then(|p|p.as_object()){if let(Some(name),Some(args))=(p.get("name").and_then(|n|n.as_str()),p.get("arguments")){let op=args.get("operation").and_then(|o|o.as_str()).unwrap_or("DEFAULT");match registry.execute_plugin(name,op,args){Ok(res)=>{let c=match res{Value::String(s)=>vec![ContentItem::Text{text:s}],Value::Null=>vec![],_=>vec![ContentItem::Text{text:res.to_string()}]};return json!({"jsonrpc":"2.0","id":request.id,"result":{"content":c}}).to_string();},Err(e)=>{let ec=ContentItem::Text{text:format!("Exec err: {}",e)};return json!({"jsonrpc":"2.0","id":request.id,"result":{"content":[ec],"isError":true}}).to_string();}}}} create_error_response(request.id.clone(),-32602,"Invalid params".into())
+}
+fn handle_completions(_request: &MCPRequest, registry: &Arc<PluginRegistry>) -> String {
+     let suggestions:Vec<Value>=vec![]; if let Some(p)=_request.params.as_ref().and_then(|p|p.as_object()){if let(Some(m),Some(pn),Some(pv))=(p.get("method").and_then(|m|m.as_str()),p.get("parameterName").and_then(|p|p.as_str()),p.get("partialValue")){if m=="tools/call"{let ctx=p.get("context").cloned().unwrap_or(Value::Null);if let Some(t_name)=ctx.get("name").and_then(|n|n.as_str()){if let Some(plugin)=registry.get_plugin(t_name){let sugg=plugin.get_completions(pn,pv,&ctx);return json!({"jsonrpc":"2.0","id":_request.id,"result":{"suggestions":sugg}}).to_string();}}else if pn=="name"{let names:Vec<String>=registry.get_all_plugins().iter().map(|p|p.name().to_string()).filter(|n|n.starts_with(pv.as_str().unwrap_or(""))).collect();return json!({"jsonrpc":"2.0","id":_request.id,"result":{"suggestions":names}}).to_string();}}}} json!({"jsonrpc":"2.0","id":_request.id,"result":{"suggestions":suggestions}}).to_string()
+}
+fn handle_ping(_request: &MCPRequest) -> String { json!({"jsonrpc":"2.0","id":_request.id,"result":{}}).to_string() }
+fn create_error_response(id: Value, code: i32, message: String) -> String { json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}}).to_string() }
+
+// --- Utility Functions ---
+fn validate_paths() -> Result<(), Box<dyn Error + Send + Sync>> { let c=Path::new(CONFIG_FILE_PATH); let d=Path::new(DATA_PATH); if !c.exists(){return Err(format!("Config file missing: {}",CONFIG_FILE_PATH).into());} if !d.exists(){return Err(format!("Data dir missing: {}",DATA_PATH).into());} Ok(()) }
+fn load_config() -> Result<Value, Box<dyn Error + Send + Sync>> { let d=fs::read_to_string(CONFIG_FILE_PATH)?; serde_json::from_str(&d).map_err(|e|e.into()) }

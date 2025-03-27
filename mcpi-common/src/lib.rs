@@ -1,3 +1,4 @@
+// mcpi-common/src/lib.rs
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -13,7 +14,7 @@ pub use plugin_factory::PluginFactory;
 pub use plugin::PluginType;
 
 // Protocol version
-pub const MCPI_VERSION: &str = "0.1.0";
+pub const MCPI_VERSION: &str = "2025-03-26";
 
 // Configuration structure
 #[derive(Deserialize, Clone)]
@@ -91,14 +92,63 @@ pub struct Resource {
     pub size: Option<u64>,
 }
 
+// Content types
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum ContentItem {
+    #[serde(rename = "text")]
+    Text { text: String },
+    
+    #[serde(rename = "image")]
+    Image { 
+        data: String, 
+        #[serde(rename = "mimeType")]
+        mime_type: String 
+    },
+    
+    // New audio content type
+    #[serde(rename = "audio")]
+    Audio { 
+        data: String, 
+        #[serde(rename = "mimeType")]
+        mime_type: String 
+    },
+    
+    #[serde(rename = "resource")]
+    Resource {
+        resource: ResourceContent
+    }
+}
+
+// Tool annotations support
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ToolAnnotation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_only: Option<bool>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destructive: Option<bool>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_confirmation: Option<bool>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<String>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limited: Option<bool>,
+}
+
 // MCP Tool types
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Tool {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotation>,
 }
 
 // MCP types for JSON-RPC
@@ -135,17 +185,104 @@ pub struct ServerInfo {
     pub version: String,
 }
 
+// Client capabilities with completions support
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct ClientCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<SamplingCapability>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roots: Option<RootsCapability>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completions: Option<CompletionsCapability>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct SamplingCapability {}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RootsCapability {
+    #[serde(rename = "listChanged")]
+    pub list_changed: bool,
+}
+
+// New completions capability
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct CompletionsCapability {}
+
+// Update server capabilities
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct ServerCapabilities {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<ResourcesCapability>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<ToolsCapability>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompts: Option<PromptsCapability>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logging: Option<LoggingCapability>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ResourcesCapability {
+    pub subscribe: bool,
+    #[serde(rename = "listChanged")]
+    pub list_changed: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ToolsCapability {
+    #[serde(rename = "listChanged")]
+    pub list_changed: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PromptsCapability {
+    #[serde(rename = "listChanged")]
+    pub list_changed: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct LoggingCapability {}
+
+// Add progress notification with message field
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProgressNotification {
+    pub id: serde_json::Value,
+    pub percentage: Option<u8>,
+    pub message: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct InitializeParams {
+    #[serde(rename = "protocolVersion")]
+    pub protocol_version: String,
+    pub capabilities: ClientCapabilities,
+    #[serde(rename = "clientInfo")]
+    pub client_info: ClientInfo,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct ClientInfo {
+    pub name: String,
+    pub version: String,
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct InitializeResult {
     #[serde(rename = "serverInfo")]
     pub server_info: ServerInfo,
     #[serde(rename = "protocolVersion")]
     pub protocol_version: String,
-    pub capabilities: serde_json::Value,
+    pub capabilities: ServerCapabilities,
     pub instructions: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]  // Added Clone trait here
 pub struct ResourceContent {
     pub uri: String,
     pub text: String,
@@ -160,14 +297,13 @@ pub struct ReadResourceResult {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct ToolCallResult {
-    pub content: Vec<Content>,
+    pub content: Vec<ContentItem>,
     #[serde(default, rename = "isError")]
     pub is_error: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Content {
-    #[serde(rename = "type")]
-    pub content_type: String,
-    pub text: Option<String>,
+    #[serde(flatten)]
+    pub content: ContentItem
 }

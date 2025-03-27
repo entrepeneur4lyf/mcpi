@@ -11,7 +11,7 @@ pub trait MessageHandler: Send + Sync {
 
 // NOTE: McpTransport and TransportError are likely no longer needed
 // if using the single-server model directly in main.rs.
-// You can remove the commented-out code below if they are not used elsewhere.
+// Keep them if you have other uses, otherwise they can be removed.
 /*
 use std::fmt;
 use std::error::Error;
@@ -23,15 +23,7 @@ pub enum TransportError {
     ShutdownError(String),
     ConnectionError(String),
 }
-impl fmt::Display for TransportError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TransportError::StartupError(msg) => write!(f, "Transport startup error: {}", msg),
-            TransportError::ShutdownError(msg) => write!(f, "Transport shutdown error: {}", msg),
-            TransportError::ConnectionError(msg) => write!(f, "Transport connection error: {}", msg),
-        }
-    }
-}
+impl fmt::Display for TransportError { ... }
 impl Error for TransportError {}
 
 pub trait McpTransport: Send + Sync {

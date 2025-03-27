@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MCPI Server Admin</title>
+    <style>
+        body { font-family: sans-serif; padding: 1em; }
+        table { border-collapse: collapse; margin-top: 1em; min-width: 400px; }
+        th, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; vertical-align: top; }
+        th { background-color: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>MCPI Server Admin</h1>
+    <h2>Server Stats</h2>
+    <div id="stats">Loading...</div>
+    <h2>Registered Plugins</h2>
+    <div id="plugins">Loading...</div>
+
+    <script>
+        async function fetchData(url, elementId) {
+            try {
+                // Use absolute paths for API calls
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                document.getElementById(elementId).innerHTML = formatData(elementId, data);
+            } catch (error) {
+                console.error(`Fetch error for ${url}:`, error);
+                document.getElementById(elementId).innerHTML = `<p style="color: red;">Error loading data from ${url}: ${error}</p>`;
+            }
+        }
+
+        function formatData(type, data) {
+            try {
+                if (type === 'stats') {
+                    return `
+                        <table>
+                            <tr><th>Uptime (seconds)</th><td>${data.uptime_seconds ?? 'N/A'}</td></tr>
+                            <tr><th>Active WebSocket Connections</th><td>${data.active_websocket_connections ?? 'N/A'}</td></tr>
+                            <tr><th>Active HTTP Sessions</th><td>${data.active_http_sessions ?? 'N/A'}</td></tr>
+                            <tr><th>Total Requests Processed</th><td>${data.total_requests_processed ?? 'N/A'}</td></tr>
+                        </table>
+                    `;
+                } else if (type === 'plugins') {
+                    let table = '<table><thead><tr><th>Name</th><th>Description</th><th>Category</th><th>Type</th><th>Operations</th></tr></thead><tbody>';
+                    if (data.plugins && data.plugins.length > 0) {
+                         data.plugins.forEach(plugin => {
+                            // Pre-calculate the operations string
+                            const opsString = (plugin.operations || []).join(', ');
+                            table += `<tr>
+                                        <td>${escapeHtml(plugin.name || '')}</td>
+                                        <td>${escapeHtml(plugin.description || '')}</td>
+                                        <td>${escapeHtml(plugin.category || '')}</td>
+                                        <td>${escapeHtml(plugin.type || '')}</td>
+                                        <td>${escapeHtml(opsString)}</td>
+                                      </tr>`;
+                        });
+                    } else {
+                        table += '<tr><td colspan="5">No plugins registered.</td></tr>';
+                    }
+                    table += '</tbody></table>';
+                    return table;
+                }
+                // Fallback for unexpected types
+                return '<pre>' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>';
+            } catch (error) {
+                 console.error(`Error formatting data for type ${type}:`, error, data);
+                 return `<p style="color: orange;">Error formatting received data.</p>`;
+            }
+        }
+
+         function escapeHtml(unsafe) {
+            if (unsafe === null || typeof unsafe === 'undefined') return '';
+            // Use proper HTML entity replacements
+            return unsafe.toString()
+                 .replace(/&/g, "&")
+                 .replace(/</g, "<")
+                 .replace(/>/g, ">")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "'");
+         }
+
+        // Use absolute paths for API calls
+        fetchData('/api/admin/stats', 'stats');
+        fetchData('/api/admin/plugins', 'plugins');
+
+        // Optional: Refresh stats periodically
+        setInterval(() => fetchData('/api/admin/stats', 'stats'), 5000);
+    </script>
+</body>
+</html>

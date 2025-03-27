@@ -1,8 +1,10 @@
 pub mod traits;
 mod websocket;
+mod streamable_http; // Add this new module
 
 pub use traits::{MessageHandler, McpTransport, TransportError};
 pub use websocket::WebSocketTransport;
+pub use streamable_http::StreamableHttpTransport; // Export the new transport
 
 use std::sync::Arc;
 

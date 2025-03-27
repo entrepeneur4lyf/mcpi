@@ -87,6 +87,29 @@ pub fn generate_forecast(location: &str) -> PluginResult {
     }))
 }
 
+/// Generate an audio forecast for a location
+pub fn generate_audio_forecast(location: &str) -> PluginResult {
+    // In a real implementation, this would generate real audio data
+    // For this example, we're using a dummy base64-encoded audio snippet
+    let dummy_audio_data = "UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+    
+    info!("Generated audio forecast for {}", location);
+    
+    Ok(json!({
+        "content": [
+            {
+                "type": "text",
+                "text": format!("Audio weather forecast for {}", location)
+            },
+            {
+                "type": "audio",
+                "data": dummy_audio_data,
+                "mimeType": "audio/wav"
+            }
+        ]
+    }))
+}
+
 /// List forecasts for all available locations
 pub fn list_all_forecasts(locations: &[String]) -> PluginResult {
     info!("Generating forecasts for {} locations", locations.len());

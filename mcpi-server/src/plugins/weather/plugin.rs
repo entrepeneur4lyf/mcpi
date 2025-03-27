@@ -2,7 +2,7 @@
 use mcpi_common::{McpPlugin, PluginResult, plugin::PluginType};
 use serde_json::{json, Value};
 use tracing::info;
-use crate::plugins::weather::operations; 
+use crate::plugins::weather::operations;
 
 pub struct WeatherPlugin {
     name: String,
@@ -44,7 +44,7 @@ impl McpPlugin for WeatherPlugin {
     }
 
     fn supported_operations(&self) -> Vec<String> {
-        vec!["GET".to_string(), "LIST".to_string()]
+        vec!["GET".to_string(), "LIST".to_string(), "GET_AUDIO".to_string()]
     }
 
     fn input_schema(&self) -> Value {
@@ -53,7 +53,7 @@ impl McpPlugin for WeatherPlugin {
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["GET", "LIST"],
+                    "enum": ["GET", "LIST", "GET_AUDIO"],
                     "description": "Operation to perform"
                 },
                 "location": {
@@ -83,6 +83,14 @@ impl McpPlugin for WeatherPlugin {
                         "available_locations": self.locations
                     }))
                 }
+            },
+            "GET_AUDIO" => {
+                let location = params.get("location")
+                    .and_then(|l| l.as_str())
+                    .unwrap_or("New York");
+                
+                info!("Generating audio weather forecast for: {}", location);
+                operations::generate_audio_forecast(location)
             },
             "LIST" => {
                 info!("Listing forecasts for all available locations");
