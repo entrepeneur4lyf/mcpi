@@ -19,4 +19,4 @@ uuid = { version = "1.4", features = ["v4"] }
 url = "2.5"
 rand = "0.8"
 tower = "0.4" # Or a compatible version with tower-http 0.5
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] } # Enable the "sync" feature
