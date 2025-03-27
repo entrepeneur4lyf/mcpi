@@ -283,7 +283,7 @@ fn handle_read_resource(request: &MCPRequest, registry: &Arc<PluginRegistry>) ->
                                          return create_error_response(request.id.clone(), 101, "Internal error: Cannot format resource content".to_string());
                                      }
                                  };
-                                 let result = ReadResourceResult { contents: vec![resource_content] };
+                                 let result = ReadResourceResult { contents: vec![resource_content],_meta: None };
                                  return json!({"jsonrpc":"2.0","id":request.id, "result": result }).to_string(); // Serialize result struct
                              },
                              Err(e)=>{warn!("Read err: {}",e);return create_error_response(request.id.clone(),100,format!("Read err: {}",e));}
